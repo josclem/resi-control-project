@@ -1,0 +1,19 @@
+{
+  "name": "resi-control",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/api",
+    "apps/web"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev --workspace @resi-control/api\" \"npm run dev --workspace @resi-control/web\"",
+    "build": "npm run build --workspace @resi-control/api && npm run build --workspace @resi-control/web",
+    "db:generate": "npm run db:generate --workspace @resi-control/api",
+    "db:push": "npm run db:push --workspace @resi-control/api",
+    "db:seed": "npm run db:seed --workspace @resi-control/api"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.1"
+  }
+}
