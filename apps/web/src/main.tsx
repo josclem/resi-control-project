@@ -43,6 +43,16 @@ const deliveryStatusLabels: Record<DeliveryState, string> = {
 };
 const api = 'http://localhost:4000';
 const getToken = () => localStorage.getItem('token') ?? '';
+const sessionExpiredEvent = 'resi-control:session-expired';
+const nativeFetch = window.fetch.bind(window);
+
+async function apiFetch(input: RequestInfo | URL, init?: RequestInit) {
+  const response = await nativeFetch(input, init);
+  if (response.status === 401 && new Headers(init?.headers).has('Authorization')) {
+    window.dispatchEvent(new Event(sessionExpiredEvent));
+  }
+  return response;
+}
 
 function AccessCodeCard({ code, label }: { code: string; label: string }) {
   const [qrUrl, setQrUrl] = useState('');
@@ -78,14 +88,14 @@ function formatColombianPhone(value: string) {
 
 async function deletePerson(id: number) {
   if (!window.confirm('¿Desactivar esta persona?')) return;
-  const response = await fetch(`${api}/api/people/${id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${getToken()}` } });
+  const response = await apiFetch(`${api}/api/people/${id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${getToken()}` } });
   if (!response.ok) { window.alert('No se pudo desactivar la persona.'); return; }
   window.location.reload();
 }
 
 async function deleteVehicle(id: number) {
   if (!window.confirm('¿Desactivar este vehículo?')) return;
-  const response = await fetch(`${api}/api/vehicles/${id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${getToken()}` } });
+  const response = await apiFetch(`${api}/api/vehicles/${id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${getToken()}` } });
   if (!response.ok) { window.alert('No se pudo desactivar el vehículo.'); return; }
   window.location.reload();
 }
@@ -93,7 +103,7 @@ async function deleteVehicle(id: number) {
 async function uploadPhoto(kind: 'people' | 'vehicles', id: number, file: File | null) {
   if (!file) return;
   const body = new FormData(); body.append('photo', file);
-  const response = await fetch(`${api}/api/${kind}/${id}/photo`, { method: 'PUT', headers: { Authorization: `Bearer ${getToken()}` }, body });
+  const response = await apiFetch(`${api}/api/${kind}/${id}/photo`, { method: 'PUT', headers: { Authorization: `Bearer ${getToken()}` }, body });
   if (!response.ok) window.alert('No se pudo guardar la foto.');
   else window.alert('Foto actualizada correctamente.');
 }
@@ -225,7 +235,7 @@ function App() {
   const token = () => localStorage.getItem('token') ?? '';
 
   async function loadDashboard() {
-    const response = await fetch(`${api}/api/dashboard`, { headers: { Authorization: `Bearer ${getToken()}` } });
+    const response = await apiFetch(`${api}/api/dashboard`, { headers: { Authorization: `Bearer ${getToken()}` } });
     if (!response.ok) throw new Error('No se pudo consultar el tablero.');
     const data = await response.json();
     setLogs(data.latest);
@@ -233,19 +243,19 @@ function App() {
   }
 
   async function loadPeople() {
-    const response = await fetch(`${api}/api/people`, { headers: { Authorization: `Bearer ${getToken()}` } });
+    const response = await apiFetch(`${api}/api/people`, { headers: { Authorization: `Bearer ${getToken()}` } });
     if (!response.ok) throw new Error('No se pudieron consultar las personas.');
     setPeople(await response.json());
   }
 
   async function loadDocumentTypes() {
-    const response = await fetch(`${api}/api/document-types`, { headers: { Authorization: `Bearer ${getToken()}` } });
+    const response = await apiFetch(`${api}/api/document-types`, { headers: { Authorization: `Bearer ${getToken()}` } });
     if (!response.ok) throw new Error('No se pudieron consultar los tipos de documento.');
     setDocumentTypes(await response.json());
   }
 
   async function loadVehicles() {
-    const response = await fetch(`${api}/api/vehicles`, { headers: { Authorization: `Bearer ${getToken()}` } });
+    const response = await apiFetch(`${api}/api/vehicles`, { headers: { Authorization: `Bearer ${getToken()}` } });
     if (!response.ok) throw new Error('No se pudieron consultar los vehículos.');
     const loadedVehicles: Vehicle[] = await response.json();
     setVehicles(loadedVehicles);
@@ -253,16 +263,16 @@ function App() {
   }
 
   async function loadDeliveries() {
-    const response = await fetch(`${api}/api/deliveries`, { headers: { Authorization: `Bearer ${getToken()}` } });
+    const response = await apiFetch(`${api}/api/deliveries`, { headers: { Authorization: `Bearer ${getToken()}` } });
     if (!response.ok) throw new Error('No se pudieron consultar las encomiendas.');
     setDeliveries(await response.json());
   }
 
   async function loadSettings() {
-    const response = await fetch(`${api}/api/settings/irregular-access`, { headers: { Authorization: `Bearer ${getToken()}` } });
+    const response = await apiFetch(`${api}/api/settings/irregular-access`, { headers: { Authorization: `Bearer ${getToken()}` } });
     if (!response.ok) throw new Error(`No se pudo consultar la configuración (HTTP ${response.status}).`);
     setIrregularMode((await response.json()).mode);
-    const captureResponse = await fetch(`${api}/api/settings/access-capture`, { headers: { Authorization: `Bearer ${token()}` } });
+    const captureResponse = await apiFetch(`${api}/api/settings/access-capture`, { headers: { Authorization: `Bearer ${token()}` } });
     if (!captureResponse.ok) throw new Error(`No se pudo consultar el modo de captura (HTTP ${captureResponse.status}).`);
     setAccessCaptureMode((await captureResponse.json()).mode);
   }
@@ -272,13 +282,13 @@ function App() {
     if (!code || scanInProgressRef.current) return;
     scanInProgressRef.current = true;
     try {
-      const scanResponse = await fetch(`${api}/api/access/scan`, {
+      const scanResponse = await apiFetch(`${api}/api/access/scan`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
         body: JSON.stringify({ code }),
       });
       const scan = await scanResponse.json().catch(() => null);
       if (!scanResponse.ok) throw new Error(`${scan?.message ?? 'Código no reconocido.'} · leído: "${code}" (${code.length} caracteres)`);
-      const accessResponse = await fetch(`${api}/api/access`, {
+      const accessResponse = await apiFetch(`${api}/api/access`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
         body: JSON.stringify({ personId: scan.personId, vehicleId: scan.vehicleId ?? undefined, accessType: scan.accessType }),
       });
@@ -316,7 +326,7 @@ function App() {
   }
 
   async function loadResidence() {
-    const response = await fetch(`${api}/api/residence`, { headers: { Authorization: `Bearer ${getToken()}` } });
+    const response = await apiFetch(`${api}/api/residence`, { headers: { Authorization: `Bearer ${getToken()}` } });
     if (!response.ok) throw new Error(`No se pudo consultar la residencia (HTTP ${response.status}).`);
     const data = await response.json();
     setResidence(data);
@@ -333,7 +343,7 @@ function App() {
       setResidenceLogoUrl('');
       return;
     }
-    const logoResponse = await fetch(`${api}/api/residence/logo`, { headers: { Authorization: `Bearer ${getToken()}` } });
+    const logoResponse = await apiFetch(`${api}/api/residence/logo`, { headers: { Authorization: `Bearer ${getToken()}` } });
     if (!logoResponse.ok) throw new Error(`No se pudo cargar el logo (HTTP ${logoResponse.status}).`);
     setResidenceLogoUrl(await blobToDataUrl(await logoResponse.blob()));
   }
@@ -342,7 +352,7 @@ function App() {
     if (!file) return;
     const body = new FormData();
     body.append('photo', file);
-    const response = await fetch(`${api}/api/${kind}/${id}/photo`, { method: 'PUT', headers: { Authorization: 'Bearer ' + token() }, body });
+    const response = await apiFetch(`${api}/api/${kind}/${id}/photo`, { method: 'PUT', headers: { Authorization: 'Bearer ' + token() }, body });
     if (!response.ok) {
       setError('No se pudo guardar la foto.');
       return;
@@ -351,6 +361,73 @@ function App() {
     else await loadPeople();
     setNotice('Foto actualizada correctamente.');
   }
+
+  useEffect(() => {
+    const handleSessionExpired = () => {
+      if (!localStorage.getItem('token')) return;
+      localStorage.removeItem('token');
+      localStorage.removeItem('userRole');
+      setAuthenticated(false);
+      setUserRole('');
+      setLoginError('Tu sesión expiró o ya no es válida. Inicia sesión nuevamente.');
+      setError('');
+      setNotice('');
+      setLogs([]);
+      setPeople([]);
+      setVehicles([]);
+      setVehiclePhotoUrls({});
+      setDocumentTypes([]);
+      setTotals({ residents: 0, visitors: 0, today: 0, pendingDeliveries: 0 });
+      setDeliveries([]);
+      setResidence(null);
+      setResidenceLogoUrl('');
+      setSelectedPersonPhoto('');
+      setSelectedVehiclePhoto('');
+      setSelectedLog(null);
+      setSelectedPerson(null);
+      setSelectedVehicle(null);
+      setPersonSearch('');
+      setSelectedPersonId('');
+      setSelectedVehicleId('');
+      setFullName('');
+      setApartmentNumber('');
+      setDocumentTypeId('');
+      setDocumentNumber('');
+      setPhone('');
+      setPersonPhoto(null);
+      setPersonPhotoPreview('');
+      setEditingPersonId(null);
+      setVehiclePlate('');
+      setVehiclePersonId('');
+      setVehicleBrand('');
+      setVehicleModel('');
+      setVehicleColor('');
+      setVehiclePhoto(null);
+      setVehiclePhotoPreview('');
+      setEditingVehicleId(null);
+      setSupervisorEmail('');
+      setSupervisorPassword('');
+      setSupervisorRequired(false);
+      setDeliveryPersonId('');
+      setDeliveryCourier('');
+      setDeliveryDescription('');
+      setDeliveryTrackingCode('');
+      setDeliveryNotes('');
+      setDeliveredToName('');
+      setShowAccessForm(false);
+      setShowPersonForm(false);
+      setShowVehicleForm(false);
+      setShowDeliveryForm(false);
+      setShowSettings(false);
+      setClosingDelivery(null);
+      scannerControlsRef.current?.stop();
+      scannerControlsRef.current = null;
+      setScannerOpen(false);
+      setScannerValue('');
+    };
+    window.addEventListener(sessionExpiredEvent, handleSessionExpired);
+    return () => window.removeEventListener(sessionExpiredEvent, handleSessionExpired);
+  }, []);
 
   useEffect(() => {
     if (!authenticated) return;
@@ -548,7 +625,7 @@ function App() {
         return;
       }
       const fetchPhoto = async (path: string) => {
-        const response = await fetch(`${api}${path}`, { headers: { Authorization: 'Bearer ' + token() } });
+        const response = await apiFetch(`${api}${path}`, { headers: { Authorization: 'Bearer ' + token() } });
         if (!response.ok) return '';
         return blobToDataUrl(await response.blob());
       };
@@ -573,7 +650,7 @@ function App() {
   async function login(event: FormEvent) {
     event.preventDefault();
     setLoginError('');
-    const response = await fetch(`${api}/api/auth/login`, {
+    const response = await apiFetch(`${api}/api/auth/login`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }),
     });
     if (!response.ok) { setLoginError('Correo o contraseña inválidos.'); return; }
@@ -588,7 +665,7 @@ function App() {
     event.preventDefault();
     setSaving(true); setError(''); setNotice('');
     try {
-      const response = await fetch(`${api}/api/people${editingPersonId ? `/${editingPersonId}` : ''}`, {
+      const response = await apiFetch(`${api}/api/people${editingPersonId ? `/${editingPersonId}` : ''}`, {
         method: editingPersonId ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
         body: JSON.stringify({ type: personType, fullName, apartmentNumber, documentTypeId: documentTypeId ? Number(documentTypeId) : undefined, documentNumber: documentNumber || undefined, phone: phone || undefined }),
@@ -600,7 +677,7 @@ function App() {
       const created = await response.json();
       if (personPhoto) {
         const body = new FormData(); body.append('photo', personPhoto);
-        const photoResponse = await fetch(`${api}/api/people/${created.id}/photo`, { method: 'PUT', headers: { Authorization: `Bearer ${getToken()}` }, body });
+        const photoResponse = await apiFetch(`${api}/api/people/${created.id}/photo`, { method: 'PUT', headers: { Authorization: `Bearer ${getToken()}` }, body });
         if (!photoResponse.ok) throw new Error('La persona se creó, pero no se pudo guardar su foto.');
       }
       setFullName(''); setApartmentNumber(''); setDocumentTypeId(''); setDocumentNumber(''); setPhone(''); setPersonPhoto(null); setPersonPhotoPreview('');
@@ -617,7 +694,7 @@ function App() {
     if (!selectedPersonId) { setError('Selecciona una persona.'); return; }
     setSaving(true); setError(''); setNotice('');
     try {
-      const response = await fetch(`${api}/api/access`, {
+      const response = await apiFetch(`${api}/api/access`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
         body: JSON.stringify({ personId: Number(selectedPersonId), vehicleId: selectedVehicleId ? Number(selectedVehicleId) : undefined, accessType, ...(supervisorRequired ? { supervisor: { email: supervisorEmail, password: supervisorPassword } } : {}) }),
@@ -632,7 +709,7 @@ function App() {
         event.preventDefault();
         setSaving(true); setError(''); setNotice('');
         try {
-          const response = await fetch(`${api}/api/vehicles${editingVehicleId ? `/${editingVehicleId}` : ''}`, {
+          const response = await apiFetch(`${api}/api/vehicles${editingVehicleId ? `/${editingVehicleId}` : ''}`, {
             method: editingVehicleId ? 'PUT' : 'POST',
             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
             body: JSON.stringify({ plate: vehiclePlate, type: vehicleType, personId: Number(vehiclePersonId), brand: vehicleBrand || undefined, model: vehicleModel || undefined, color: vehicleColor || undefined }),
@@ -641,7 +718,7 @@ function App() {
           if (!response.ok) throw new Error(data?.message ?? 'No se pudo guardar el vehículo.');
           if (vehiclePhoto) {
             const body = new FormData(); body.append('photo', vehiclePhoto);
-            const photoResponse = await fetch(`${api}/api/vehicles/${data.id}/photo`, { method: 'PUT', headers: { Authorization: `Bearer ${getToken()}` }, body });
+            const photoResponse = await apiFetch(`${api}/api/vehicles/${data.id}/photo`, { method: 'PUT', headers: { Authorization: `Bearer ${getToken()}` }, body });
             if (!photoResponse.ok) throw new Error('El vehículo se creó, pero no se pudo guardar su foto.');
           }
           setVehiclePlate(''); setVehiclePersonId(''); setVehicleBrand(''); setVehicleModel(''); setVehicleColor(''); setVehiclePhoto(null); setVehiclePhotoPreview('');
@@ -665,7 +742,7 @@ function App() {
     event.preventDefault();
     setSaving(true); setError(''); setNotice('');
     try {
-      const response = await fetch(`${api}/api/vehicles`, {
+      const response = await apiFetch(`${api}/api/vehicles`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
         body: JSON.stringify({ plate: vehiclePlate, type: vehicleType, personId: Number(vehiclePersonId), brand: vehicleBrand || undefined, model: vehicleModel || undefined, color: vehicleColor || undefined }),
@@ -675,7 +752,7 @@ function App() {
       if (vehiclePhoto) {
         const body = new FormData();
         body.append('photo', vehiclePhoto);
-        const photoResponse = await fetch(`${api}/api/vehicles/${data.id}/photo`, { method: 'PUT', headers: { Authorization: 'Bearer ' + token() }, body });
+        const photoResponse = await apiFetch(`${api}/api/vehicles/${data.id}/photo`, { method: 'PUT', headers: { Authorization: 'Bearer ' + token() }, body });
         if (!photoResponse.ok) throw new Error('El vehículo se creó, pero no se pudo guardar su foto.');
       }
 
@@ -693,7 +770,7 @@ function App() {
     if (!deliveryPersonId) { setError('Selecciona el destinatario de la encomienda.'); return; }
     setSaving(true); setError(''); setNotice('');
     try {
-      const response = await fetch(`${api}/api/deliveries`, {
+      const response = await apiFetch(`${api}/api/deliveries`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
         body: JSON.stringify({
@@ -720,7 +797,7 @@ function App() {
   async function updateDeliveryStatus(delivery: Delivery, status: 'ENTREGADA' | 'DEVUELTA', recipient = '') {
     setSaving(true); setError(''); setNotice('');
     try {
-      const response = await fetch(`${api}/api/deliveries/${delivery.id}/status`, {
+      const response = await apiFetch(`${api}/api/deliveries/${delivery.id}/status`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
         body: JSON.stringify({ status, deliveredToName: recipient || undefined }),
@@ -769,7 +846,7 @@ function App() {
 
   async function deleteVehiclePhoto(id: number) {
     if (!window.confirm('¿Eliminar la foto de este vehículo?')) return;
-    const response = await fetch(`${api}/api/vehicles/${id}/photo`, { method: 'DELETE', headers: { Authorization: 'Bearer ' + token() } });
+    const response = await apiFetch(`${api}/api/vehicles/${id}/photo`, { method: 'DELETE', headers: { Authorization: 'Bearer ' + token() } });
     if (!response.ok) { setError('No se pudo eliminar la foto del vehículo.'); return; }
     await loadVehicles();
     setNotice('Foto del vehículo eliminada correctamente.');
@@ -777,7 +854,7 @@ function App() {
 
   async function deletePersonPhoto(id: number) {
     if (!window.confirm('¿Eliminar la foto de esta persona?')) return;
-    const response = await fetch(`${api}/api/people/${id}/photo`, { method: 'DELETE', headers: { Authorization: 'Bearer ' + token() } });
+    const response = await apiFetch(`${api}/api/people/${id}/photo`, { method: 'DELETE', headers: { Authorization: 'Bearer ' + token() } });
     if (!response.ok) { setError('No se pudo eliminar la foto de la persona.'); return; }
     await loadPeople();
     setNotice('Foto de la persona eliminada correctamente.');
@@ -785,7 +862,7 @@ function App() {
 
   async function deleteVehicle(id: number) {
     if (!window.confirm('¿Desactivar este vehículo?')) return;
-    const response = await fetch(`${api}/api/vehicles/${id}`, { method: 'DELETE', headers: { Authorization: 'Bearer ' + token() } });
+    const response = await apiFetch(`${api}/api/vehicles/${id}`, { method: 'DELETE', headers: { Authorization: 'Bearer ' + token() } });
     if (!response.ok) { setError('No se pudo desactivar el vehículo.'); return; }
     await loadVehicles();
     setNotice('Vehículo desactivado correctamente.');
@@ -795,7 +872,7 @@ function App() {
     event.preventDefault();
     setSaving(true); setError(''); setNotice('');
     try {
-      const response = await fetch(`${api}/api/settings/irregular-access`, {
+      const response = await apiFetch(`${api}/api/settings/irregular-access`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
         body: JSON.stringify({ mode: irregularMode }),
       });
@@ -809,7 +886,7 @@ function App() {
     event.preventDefault();
     setSaving(true); setError(''); setNotice('');
     try {
-      const response = await fetch(`${api}/api/settings/access-capture`, {
+      const response = await apiFetch(`${api}/api/settings/access-capture`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
         body: JSON.stringify({ mode: accessCaptureMode }),
       });
@@ -827,7 +904,7 @@ function App() {
       body.append('name', residenceName);
       body.append('removeLogo', String(removeResidenceLogo));
       if (residenceLogo) body.append('logo', residenceLogo);
-      const response = await fetch(`${api}/api/residence`, { method: 'PUT', headers: { Authorization: `Bearer ${getToken()}` }, body });
+      const response = await apiFetch(`${api}/api/residence`, { method: 'PUT', headers: { Authorization: `Bearer ${getToken()}` }, body });
       const data = await response.json().catch(() => null);
       if (!response.ok) throw new Error(data?.message ?? 'No se pudo guardar la residencia.');
       const updatedResidence = { ...data, hasLogo: Boolean(data.logoMimeType) };
