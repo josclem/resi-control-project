@@ -21,6 +21,18 @@ Usuario inicial de desarrollo: `admin@resicontrol.local` / `Admin123!`. Debe cam
 
 La API queda en `http://localhost:4000` y el frontend en `http://localhost:5173`.
 
+## Flujo de ramas
+
+`main` es la rama principal y el punto de partida para el trabajo. Las funciones y correcciones se desarrollan y prueban en su propia rama; `production` se reserva para preparar exactamente el código que se publicará.
+
+1. **Crear una rama de trabajo desde `main` actualizado.** Usa un nombre descriptivo, por ejemplo `feature/reportes-encomiendas` o `fix/duplicated-access-movement`.
+2. **Desarrollar y probar en esa misma rama.** Haz commits pequeños y descriptivos. Corrige allí los problemas encontrados y repite las pruebas; no cambies de rama para continuar ese trabajo.
+3. **Integrar en `main` cuando la rama esté validada.** Usa un pull request de la rama de trabajo a `main`. `main` contiene el trabajo integrado y probado, y sirve de base para las siguientes ramas.
+4. **Preparar una publicación en `production` cuando se decida qué versión lanzar.** Crea o actualiza `production` desde el commit aprobado de `main` que se publicará. Esa rama representa el código candidato/de producción; allí se hacen las comprobaciones finales de publicación, no el desarrollo habitual.
+5. Si la validación de una rama de trabajo falla, continúa corrigiendo y probando en esa rama. Si falla la validación de publicación, corrige el cambio en una rama de trabajo, intégralo en `main` tras validarlo y actualiza `production` con el código aprobado.
+
+No trabajes directamente sobre `main` ni `production`. Mantén las ramas actualizadas con el remoto y no incluyas archivos locales, secretos ni artefactos generados en los commits. La rama `qa` existente es histórica y no forma parte del flujo actual.
+
 ## Modelo inicial
 
 Se separan residentes, visitantes y usuarios del sistema. Un residente o visitante puede tener múltiples registros de acceso. Cada registro conserva tipo de acceso, fecha/hora, nombre y apartamento. Las encomiendas se asocian a una persona y conservan tipo, estado, remitente, guía, fecha de recepción y datos de entrega. Los nombres de perfiles son datos de configuración del dominio y pueden cambiarse más adelante sin afectar el flujo.
