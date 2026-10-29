@@ -4,6 +4,7 @@ import JsBarcode from 'jsbarcode';
 import QRCode from 'qrcode';
 import { FormEvent, StrictMode, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import './access-search.css';
 import './styles.css';
 
 type BuildingSectionType = 'TORRE' | 'INTERIOR';
@@ -50,6 +51,9 @@ function formatBuildingSection(person: PersonLocation) {
 }
 function formatPersonLocation(person: PersonLocation) {
   return `${formatBuildingSection(person)} · Apto. ${person.apartmentNumber}`;
+}
+function normalizePersonSearch(value: string) {
+  return value.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
 const api = 'http://localhost:4000';
 const getToken = () => localStorage.getItem('token') ?? '';
@@ -786,6 +790,10 @@ function App() {
     setShowAccessForm(true);
   }
 
+  const matchingAccessPeople = people.filter((person) =>
+    normalizePersonSearch(`${person.fullName} ${person.documentNumber ?? ''}`).includes(normalizePersonSearch(personSearch.trim())),
+  );
+
   async function createDelivery(event: FormEvent) {
     event.preventDefault();
     if (!deliveryPersonId) { setError('Selecciona el destinatario de la encomienda.'); return; }
@@ -997,8 +1005,8 @@ function App() {
       <button disabled={saving} type="submit">{saving ? 'Guardando...' : 'Guardar persona'}</button>
     </form></section></div>}
     {activeView === 'movements' && showAccessForm && <section className="form-panel"><div className="panel-heading"><div><span className="eyebrow">MOVIMIENTO</span><h2>Registrar acceso</h2></div><button className="secondary" onClick={() => setShowAccessForm(false)}>Cancelar</button></div>{people.length ? <form className="form-grid" onSubmit={createAccess}>
-      <label>Persona<input value={personSearch} onChange={(event) => setPersonSearch(event.target.value)} placeholder="Buscar por nombre o documento" /><select required value={selectedPersonId} onChange={(event) => { setSelectedPersonId(event.target.value); setSelectedVehicleId(''); }}><option value="">Selecciona una persona</option>{people.filter((person) => person.id === Number(selectedPersonId) || `${person.fullName} ${person.documentNumber ?? ''}`.toLowerCase().includes(personSearch.toLowerCase())).map((person) => <option key={person.id} value={person.id}>{person.fullName} · {person.documentNumber || 'Sin documento'} · {formatPersonLocation(person)}</option>)}</select></label>
-      <label>Vehículo (opcional)<select value={selectedVehicleId} onChange={(event) => { const vehicleId = event.target.value; setSelectedVehicleId(vehicleId); if (vehicleId) { const vehicle = vehicles.find((item) => String(item.id) === vehicleId); if (vehicle) { setSelectedPersonId(String(vehicle.personId)); setPersonSearch(''); } } }}><option value="">Movimiento peatonal</option>{vehicles.map((vehicle) => <option key={vehicle.id} value={vehicle.id}>{vehicle.plate} · {vehicle.person.fullName} · {formatPersonLocation(vehicle.person)}</option>)}</select></label>
+      <label>Persona<input role="combobox" aria-autocomplete="list" aria-controls="access-person-results" aria-expanded={personSearch.trim().length > 0 && !selectedPersonId} value={personSearch} onChange={(event) => { setPersonSearch(event.target.value); setSelectedPersonId(''); setSelectedVehicleId(''); }} onKeyDown={(event) => { if (event.key === 'Enter' && personSearch.trim() && !selectedPersonId && matchingAccessPeople.length > 0) { event.preventDefault(); const person = matchingAccessPeople[0]; setSelectedPersonId(String(person.id)); setPersonSearch(person.fullName); } }} placeholder="Buscar por nombre o documento" />{personSearch.trim() && !selectedPersonId && <div id="access-person-results" className="person-search-results" role="listbox">{matchingAccessPeople.length ? matchingAccessPeople.slice(0, 8).map((person) => <button key={person.id} type="button" role="option" aria-selected="false" className="person-search-result" onClick={() => { setSelectedPersonId(String(person.id)); setSelectedVehicleId(''); setPersonSearch(person.fullName); }}>{person.fullName} · {person.documentNumber || 'Sin documento'} · {formatPersonLocation(person)}</button>) : <span className="person-search-empty">No se encontraron personas.</span>}</div>}</label>
+      <label>Vehículo (opcional)<select value={selectedVehicleId} onChange={(event) => { const vehicleId = event.target.value; setSelectedVehicleId(vehicleId); if (vehicleId) { const vehicle = vehicles.find((item) => String(item.id) === vehicleId); if (vehicle) { setSelectedPersonId(String(vehicle.personId)); setPersonSearch(vehicle.person.fullName); } } }}><option value="">Movimiento peatonal</option>{vehicles.map((vehicle) => <option key={vehicle.id} value={vehicle.id}>{vehicle.plate} · {vehicle.person.fullName} · {formatPersonLocation(vehicle.person)}</option>)}</select></label>
       <label>Movimiento<select value={accessType} onChange={(event) => setAccessType(event.target.value as 'ENTRADA' | 'SALIDA')}><option value="ENTRADA">Entrada</option><option value="SALIDA">Salida</option></select></label>
       {supervisorRequired && <><div className="notice form-full">Se requiere autorización de supervisor para este movimiento irregular.</div><label>Correo del supervisor<input type="email" required value={supervisorEmail} onChange={(event) => setSupervisorEmail(event.target.value)} /></label><label>Contraseña del supervisor<input type="password" required value={supervisorPassword} onChange={(event) => setSupervisorPassword(event.target.value)} /></label></>}
       <button disabled={saving} type="submit">{saving ? 'Guardando...' : 'Guardar movimiento'}</button>
