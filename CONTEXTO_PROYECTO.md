@@ -56,6 +56,7 @@ Archivos principales:
   - `VIGILANTE`
 - Aislamiento por residencia mediante `residenceId`.
 - El usuario y su residencia se vuelven a validar desde PostgreSQL.
+- Si una solicitud autenticada recibe `401`, el frontend elimina la sesión local, limpia los datos protegidos y vuelve al formulario de inicio de sesión.
 - Cada residencia puede tener:
   - Nombre.
   - Código.
@@ -564,4 +565,3 @@ Funcionalidad futura ya anotada (no implementar todavía):
 - App de residentes para pre-registrar visitas peatonales o vehiculares.
 - La visita se anuncia y se identifica al llegar; el sistema valida el pre-registro y registra la entrada.
 - El residente recibe una notificación cuando su visita llega.
-
