@@ -18,6 +18,11 @@ enum PersonType {
   VISITANTE
 }
 
+enum BuildingSectionType {
+  TORRE
+  INTERIOR
+}
+
 enum AccessType {
   ENTRADA
   SALIDA
@@ -83,6 +88,8 @@ model Person {
   fullName         String
   documentNumber   String?
   documentTypeId   Int?
+  buildingSectionType BuildingSectionType?
+  buildingSectionNumber String?
   apartmentNumber  String
   phone            String?
   biometricRef     String?    @unique
@@ -99,6 +106,7 @@ model Person {
 
   @@index([fullName])
   @@index([apartmentNumber])
+  @@index([residenceId, buildingSectionType, buildingSectionNumber])
   @@unique([residenceId, documentTypeId, documentNumber])
 }
 

@@ -4,7 +4,7 @@ import multer from 'multer';
 import cors from 'cors';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
-import { PrismaClient, UserRole, PersonType, AccessType, VehicleType, DeliveryType, DeliveryStatus } from '@prisma/client';
+import { PrismaClient, UserRole, PersonType, BuildingSectionType, AccessType, VehicleType, DeliveryType, DeliveryStatus } from '@prisma/client';
 import { z } from 'zod';
 
 const prisma = new PrismaClient();
@@ -60,6 +60,8 @@ function photoData(file: Express.Multer.File) {
 const personSchema = z.object({
   type: z.nativeEnum(PersonType),
   fullName: z.string().trim().min(2),
+  buildingSectionType: z.nativeEnum(BuildingSectionType),
+  buildingSectionNumber: z.string().trim().min(1).max(30),
   apartmentNumber: z.string().trim().min(1),
   documentTypeId: z.number().int().positive().optional(),
   documentNumber: z.string().trim().min(1).optional(),
@@ -321,7 +323,7 @@ app.get('/api/vehicles', requireAuth, async (_req: AuthenticatedRequest, res, ne
     const vehicles = await prisma.vehicle.findMany({
       where: { residenceId: _req.user!.residenceId, active: true },
       orderBy: { plate: 'asc' },
-      include: { person: { select: { id: true, fullName: true, type: true, apartmentNumber: true } }, photo: { select: { data: true, mimeType: true } } },
+      include: { person: { select: { id: true, fullName: true, type: true, buildingSectionType: true, buildingSectionNumber: true, apartmentNumber: true } }, photo: { select: { data: true, mimeType: true } } },
     });
     return res.json(vehicles.map(({ photo, ...vehicle }) => ({
       ...vehicle,
@@ -338,7 +340,7 @@ app.post('/api/vehicles', requireAuth, allowRoles(UserRole.SUPER_ADMINISTRADOR, 
     if (!person) return res.status(400).json({ message: 'La persona asociada no existe o está inactiva.' });
     return res.status(201).json(await prisma.vehicle.create({
       data: { ...input, residenceId: req.user!.residenceId, plate },
-      include: { person: { select: { id: true, fullName: true, type: true, apartmentNumber: true } } },
+      include: { person: { select: { id: true, fullName: true, type: true, buildingSectionType: true, buildingSectionNumber: true, apartmentNumber: true } } },
     }));
   } catch (error) {
     if (error instanceof Error && 'code' in error && error.code === 'P2002') {
@@ -349,7 +351,7 @@ app.post('/api/vehicles', requireAuth, allowRoles(UserRole.SUPER_ADMINISTRADOR, 
 });
 
 const deliveryRelations = {
-  person: { select: { id: true, fullName: true, apartmentNumber: true, type: true } },
+  person: { select: { id: true, fullName: true, buildingSectionType: true, buildingSectionNumber: true, apartmentNumber: true, type: true } },
   receivedBy: { select: { id: true, name: true } },
   deliveredBy: { select: { id: true, name: true } },
 };
@@ -540,7 +542,7 @@ app.post('/api/access/scan', requireAuth, async (req: AuthenticatedRequest, res,
       personId: person.id,
       vehicleId: vehicle?.id ?? null,
       accessType: lastAccess?.accessType === AccessType.ENTRADA ? AccessType.SALIDA : AccessType.ENTRADA,
-      person: { fullName: person.fullName, apartmentNumber: person.apartmentNumber },
+      person: { fullName: person.fullName, buildingSectionType: person.buildingSectionType, buildingSectionNumber: person.buildingSectionNumber, apartmentNumber: person.apartmentNumber },
       vehicle: vehicle ? { plate: vehicle.plate } : null,
     });
   } catch (error) { return next(error); }
