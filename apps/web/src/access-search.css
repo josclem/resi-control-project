@@ -1,4 +1,4 @@
-.person-search-results {
+.access-search-results {
   display: flex;
   flex-direction: column;
   max-height: 240px;
@@ -10,7 +10,7 @@
   box-shadow: 0 5px 18px #1d31520b;
 }
 
-.form-grid .person-search-result {
+.form-grid .access-search-result {
   align-self: stretch;
   padding: 10px 12px;
   border-radius: 0;
@@ -19,12 +19,12 @@
   text-align: left;
 }
 
-.form-grid .person-search-result:hover,
-.form-grid .person-search-result:focus-visible {
+.form-grid .access-search-result:hover,
+.form-grid .access-search-result:focus-visible {
   background: #f0f5ff;
 }
 
-.person-search-empty {
+.access-search-empty {
   padding: 10px 12px;
   color: #74809a;
   font-size: 13px;

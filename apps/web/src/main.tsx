@@ -190,6 +190,7 @@ function App() {
   const [selectedPersonId, setSelectedPersonId] = useState('');
   const [selectedVehicleId, setSelectedVehicleId] = useState('');
   const [personSearch, setPersonSearch] = useState('');
+  const [vehicleSearch, setVehicleSearch] = useState('');
   const [accessCaptureMode, setAccessCaptureMode] = useState<AccessCaptureMode>('MANUAL');
   const [scannerValue, setScannerValue] = useState('');
   const [scannerOpen, setScannerOpen] = useState(false);
@@ -787,11 +788,16 @@ function App() {
     setSelectedPersonId('');
     setSelectedVehicleId('');
     setPersonSearch('');
+    setVehicleSearch('');
     setShowAccessForm(true);
   }
 
   const matchingAccessPeople = people.filter((person) =>
     normalizePersonSearch(`${person.fullName} ${person.documentNumber ?? ''}`).includes(normalizePersonSearch(personSearch.trim())),
+  );
+  const matchingAccessVehicles = vehicles.filter((vehicle) =>
+    normalizePersonSearch(`${vehicle.plate} ${vehicle.person.fullName} ${formatPersonLocation(vehicle.person)}`)
+      .includes(normalizePersonSearch(vehicleSearch.trim())),
   );
 
   async function createDelivery(event: FormEvent) {
@@ -1005,8 +1011,8 @@ function App() {
       <button disabled={saving} type="submit">{saving ? 'Guardando...' : 'Guardar persona'}</button>
     </form></section></div>}
     {activeView === 'movements' && showAccessForm && <section className="form-panel"><div className="panel-heading"><div><span className="eyebrow">MOVIMIENTO</span><h2>Registrar acceso</h2></div><button className="secondary" onClick={() => setShowAccessForm(false)}>Cancelar</button></div>{people.length ? <form className="form-grid" onSubmit={createAccess}>
-      <label>Persona<input role="combobox" aria-autocomplete="list" aria-controls="access-person-results" aria-expanded={personSearch.trim().length > 0 && !selectedPersonId} value={personSearch} onChange={(event) => { setPersonSearch(event.target.value); setSelectedPersonId(''); setSelectedVehicleId(''); }} onKeyDown={(event) => { if (event.key === 'Enter' && personSearch.trim() && !selectedPersonId && matchingAccessPeople.length > 0) { event.preventDefault(); const person = matchingAccessPeople[0]; setSelectedPersonId(String(person.id)); setPersonSearch(person.fullName); } }} placeholder="Buscar por nombre o documento" />{personSearch.trim() && !selectedPersonId && <div id="access-person-results" className="person-search-results" role="listbox">{matchingAccessPeople.length ? matchingAccessPeople.slice(0, 8).map((person) => <button key={person.id} type="button" role="option" aria-selected="false" className="person-search-result" onClick={() => { setSelectedPersonId(String(person.id)); setSelectedVehicleId(''); setPersonSearch(person.fullName); }}>{person.fullName} · {person.documentNumber || 'Sin documento'} · {formatPersonLocation(person)}</button>) : <span className="person-search-empty">No se encontraron personas.</span>}</div>}</label>
-      <label>Vehículo (opcional)<select value={selectedVehicleId} onChange={(event) => { const vehicleId = event.target.value; setSelectedVehicleId(vehicleId); if (vehicleId) { const vehicle = vehicles.find((item) => String(item.id) === vehicleId); if (vehicle) { setSelectedPersonId(String(vehicle.personId)); setPersonSearch(vehicle.person.fullName); } } }}><option value="">Movimiento peatonal</option>{vehicles.map((vehicle) => <option key={vehicle.id} value={vehicle.id}>{vehicle.plate} · {vehicle.person.fullName} · {formatPersonLocation(vehicle.person)}</option>)}</select></label>
+      <label>Persona<input role="combobox" aria-autocomplete="list" aria-controls="access-person-results" aria-expanded={personSearch.trim().length > 0 && !selectedPersonId} value={personSearch} onChange={(event) => { setPersonSearch(event.target.value); setSelectedPersonId(''); setSelectedVehicleId(''); setVehicleSearch(''); }} onKeyDown={(event) => { if (event.key === 'Enter' && personSearch.trim() && !selectedPersonId && matchingAccessPeople.length > 0) { event.preventDefault(); const person = matchingAccessPeople[0]; setSelectedPersonId(String(person.id)); setPersonSearch(person.fullName); } }} placeholder="Buscar por nombre o documento" />{personSearch.trim() && !selectedPersonId && <div id="access-person-results" className="access-search-results" role="listbox">{matchingAccessPeople.length ? matchingAccessPeople.slice(0, 8).map((person) => <button key={person.id} type="button" role="option" aria-selected="false" className="access-search-result" onClick={() => { setSelectedPersonId(String(person.id)); setSelectedVehicleId(''); setPersonSearch(person.fullName); setVehicleSearch(''); }}>{person.fullName} · {person.documentNumber || 'Sin documento'} · {formatPersonLocation(person)}</button>) : <span className="access-search-empty">No se encontraron personas.</span>}</div>}</label>
+      <label>Vehículo (opcional)<input role="combobox" aria-autocomplete="list" aria-controls="access-vehicle-results" aria-expanded={vehicleSearch.trim().length > 0 && !selectedVehicleId} value={vehicleSearch} onChange={(event) => { setVehicleSearch(event.target.value); setSelectedVehicleId(''); }} onKeyDown={(event) => { if (event.key === 'Enter' && vehicleSearch.trim() && !selectedVehicleId && matchingAccessVehicles.length > 0) { event.preventDefault(); const vehicle = matchingAccessVehicles[0]; setSelectedVehicleId(String(vehicle.id)); setSelectedPersonId(String(vehicle.personId)); setPersonSearch(vehicle.person.fullName); setVehicleSearch(vehicle.plate); } }} placeholder="Buscar por placa o propietario" />{vehicleSearch.trim() && !selectedVehicleId && <div id="access-vehicle-results" className="access-search-results" role="listbox">{matchingAccessVehicles.length ? matchingAccessVehicles.slice(0, 8).map((vehicle) => <button key={vehicle.id} type="button" role="option" aria-selected="false" className="access-search-result" onClick={() => { setSelectedVehicleId(String(vehicle.id)); setSelectedPersonId(String(vehicle.personId)); setPersonSearch(vehicle.person.fullName); setVehicleSearch(vehicle.plate); }}>{vehicle.plate} · {vehicle.person.fullName} · {formatPersonLocation(vehicle.person)}</button>) : <span className="access-search-empty">No se encontraron vehículos.</span>}</div>}</label>
       <label>Movimiento<select value={accessType} onChange={(event) => setAccessType(event.target.value as 'ENTRADA' | 'SALIDA')}><option value="ENTRADA">Entrada</option><option value="SALIDA">Salida</option></select></label>
       {supervisorRequired && <><div className="notice form-full">Se requiere autorización de supervisor para este movimiento irregular.</div><label>Correo del supervisor<input type="email" required value={supervisorEmail} onChange={(event) => setSupervisorEmail(event.target.value)} /></label><label>Contraseña del supervisor<input type="password" required value={supervisorPassword} onChange={(event) => setSupervisorPassword(event.target.value)} /></label></>}
       <button disabled={saving} type="submit">{saving ? 'Guardando...' : 'Guardar movimiento'}</button>
