@@ -1,0 +1,215 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  SUPER_ADMINISTRADOR
+  ADMINISTRADOR
+  VIGILANTE
+}
+
+enum PersonType {
+  RESIDENTE
+  VISITANTE
+}
+
+enum AccessType {
+  ENTRADA
+  SALIDA
+}
+
+enum VehicleType {
+  AUTOMOVIL
+  MOTOCICLETA
+  BICICLETA
+  OTRO
+}
+
+enum DeliveryType {
+  COMIDA
+  PAQUETE
+  RECIBO
+  CORREO
+  OTRO
+}
+
+enum DeliveryStatus {
+  PENDIENTE
+  ENTREGADA
+  DEVUELTA
+}
+
+model Residence {
+  id          Int             @id @default(autoincrement())
+  name        String
+  code        String          @unique
+  active      Boolean         @default(true)
+  logoData    Bytes?
+  logoMimeType String?
+  createdAt   DateTime        @default(now())
+  users       User[]
+  people      Person[]
+  vehicles    Vehicle[]
+  accessLogs  AccessLog[]
+  settings    SystemSetting[]
+  deliveries  Delivery[]
+}
+
+model User {
+  id           Int      @id @default(autoincrement())
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         UserRole
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  residenceId  Int      @default(1)
+  residence    Residence @relation(fields: [residenceId], references: [id])
+  accessLogs   AccessLog[]
+  authorizedAccessLogs AccessLog[] @relation("AccessOverride")
+  receivedDeliveries Delivery[] @relation("DeliveryReceived")
+  deliveredDeliveries Delivery[] @relation("DeliveryDelivered")
+}
+
+model Person {
+  id               Int        @id @default(autoincrement())
+  accessCode       String     @unique @default(uuid())
+  type             PersonType
+  fullName         String
+  documentNumber   String?
+  documentTypeId   Int?
+  apartmentNumber  String
+  phone            String?
+  biometricRef     String?    @unique
+  active           Boolean    @default(true)
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+  residenceId      Int        @default(1)
+  residence       Residence  @relation(fields: [residenceId], references: [id])
+  accessLogs       AccessLog[]
+  vehicles         Vehicle[]
+  documentType     DocumentType? @relation(fields: [documentTypeId], references: [id])
+  photo            PersonPhoto?
+  deliveries       Delivery[]
+
+  @@index([fullName])
+  @@index([apartmentNumber])
+  @@unique([residenceId, documentTypeId, documentNumber])
+}
+
+model PersonPhoto {
+  id        Int      @id @default(autoincrement())
+  data      Bytes
+  mimeType  String
+  fileName  String?
+  size      Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  personId  Int      @unique
+  person    Person   @relation(fields: [personId], references: [id], onDelete: Cascade)
+}
+
+model Vehicle {
+  id            Int         @id @default(autoincrement())
+  accessCode    String      @unique @default(uuid())
+  plate         String
+  type          VehicleType
+  brand         String?
+  model         String?
+  color         String?
+  active        Boolean     @default(true)
+  personId      Int
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  residenceId   Int         @default(1)
+  residence     Residence   @relation(fields: [residenceId], references: [id])
+  person        Person      @relation(fields: [personId], references: [id])
+  accessLogs    AccessLog[]
+  photo         VehiclePhoto?
+
+  @@index([personId])
+  @@unique([residenceId, plate])
+}
+
+model VehiclePhoto {
+  id        Int      @id @default(autoincrement())
+  data      Bytes
+  mimeType  String
+  fileName  String?
+  size      Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  vehicleId Int      @unique
+  vehicle   Vehicle  @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+}
+
+model DocumentType {
+  id        Int      @id @default(autoincrement())
+  code      String   @unique
+  name      String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  people    Person[]
+}
+
+model AccessLog {
+  id          Int        @id @default(autoincrement())
+  accessType  AccessType
+  occurredAt  DateTime   @default(now())
+  personId    Int
+  vehicleId   Int?
+  registeredById Int
+  overrideAuthorizedById Int?
+  residenceId Int @default(1)
+  residence Residence @relation(fields: [residenceId], references: [id])
+  person      Person     @relation(fields: [personId], references: [id])
+  vehicle     Vehicle?   @relation(fields: [vehicleId], references: [id])
+  registeredBy User      @relation(fields: [registeredById], references: [id])
+  overrideAuthorizedBy User? @relation("AccessOverride", fields: [overrideAuthorizedById], references: [id])
+
+  @@index([occurredAt])
+  @@index([accessType])
+  @@index([vehicleId])
+}
+
+model SystemSetting {
+  id        Int      @id @default(autoincrement())
+  key       String
+  value     String
+  residenceId Int    @default(1)
+  residence Residence @relation(fields: [residenceId], references: [id])
+  updatedAt DateTime @updatedAt
+  @@unique([residenceId, key])
+}
+
+model Delivery {
+  id              Int            @id @default(autoincrement())
+  type            DeliveryType
+  status          DeliveryStatus @default(PENDIENTE)
+  courier         String?
+  description     String?
+  trackingCode    String?
+  notes           String?
+  receivedAt      DateTime       @default(now())
+  deliveredAt     DateTime?
+  deliveredToName String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  personId        Int
+  residenceId     Int            @default(1)
+  receivedById    Int
+  deliveredById   Int?
+  person          Person         @relation(fields: [personId], references: [id])
+  residence       Residence      @relation(fields: [residenceId], references: [id])
+  receivedBy      User           @relation("DeliveryReceived", fields: [receivedById], references: [id])
+  deliveredBy     User?          @relation("DeliveryDelivered", fields: [deliveredById], references: [id])
+
+  @@index([status])
+  @@index([receivedAt])
+  @@index([personId])
+}
