@@ -21,6 +21,18 @@ Usuario inicial de desarrollo: `admin@resicontrol.local` / `Admin123!`. Debe cam
 
 La API queda en `http://localhost:4000` y el frontend en `http://localhost:5173`.
 
+## Pruebas automatizadas
+
+Actualmente no hay suites de pruebas unitarias ni de integración configuradas; `npm run build` valida compilación y tipos, pero no sustituye pruebas de comportamiento. Incorporar pruebas automatizadas es el siguiente trabajo técnico prioritario antes de seguir ampliando funcionalidades.
+
+- **Unitarias:** probar funciones puras y reglas de negocio pequeñas sin conectarse a la base de datos.
+- **Integración:** probar rutas y persistencia de la API con PostgreSQL aislado para pruebas; nunca usar la base de desarrollo o producción.
+- **Primeros flujos:** movimientos duplicados y autorización de supervisor; cierre de encomiendas y validación de quién recibe; validación de acceso por residencia y permisos.
+- **Ejecución:** cada pull request debe pasar las pruebas y `npm run build`. Las pruebas de integración deben preparar y limpiar sus propios datos de forma repetible.
+- **Diseño para probar:** separar la creación de la aplicación Express del arranque del servidor para poder probar la API sin abrir un puerto real.
+
+El runner y las dependencias de pruebas se incorporarán en la rama dedicada a esta tarea, junto con scripts documentados para ejecutar las suites.
+
 ## Flujo de ramas
 
 `main` es la rama principal y el punto de partida para el trabajo. Las funciones y correcciones se desarrollan y prueban en su propia rama; `production` se reserva para preparar exactamente el código que se publicará.

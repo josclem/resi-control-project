@@ -408,6 +408,14 @@ En Windows, si `prisma generate` falla con `EPERM` por el motor bloqueado, hay q
 
 El build muestra una advertencia de Vite sobre un bundle frontend grande debido a las dependencias de lectura y generación de códigos. No bloquea la compilación, pero puede optimizarse más adelante con carga diferida (`dynamic import`) y división de chunks.
 
+### Pruebas automatizadas
+
+- Actualmente no existe una suite unitaria ni de integración; el build comprueba tipos y compilación, no el comportamiento.
+- La siguiente mejora técnica prioritaria es incorporar ambas suites, empezando por reglas críticas de acceso y encomiendas.
+- Las pruebas de integración deben usar una base PostgreSQL exclusiva de pruebas, nunca la base local de desarrollo ni producción.
+- Los primeros casos a cubrir son movimientos consecutivos del mismo tipo y autorización de supervisor, cierre de encomiendas y validación del receptor, y aislamiento por residencia y permisos.
+- Cada PR debe ejecutar las pruebas automatizadas y `npm run build`.
+
 ## Pendientes prioritarios
 
 ### 1. Probar manualmente los códigos
