@@ -779,6 +779,13 @@ function App() {
     } finally { setSaving(false); }
   }
 
+  function openAccessForm() {
+    setSelectedPersonId('');
+    setSelectedVehicleId('');
+    setPersonSearch('');
+    setShowAccessForm(true);
+  }
+
   async function createDelivery(event: FormEvent) {
     event.preventDefault();
     if (!deliveryPersonId) { setError('Selecciona el destinatario de la encomienda.'); return; }
@@ -990,7 +997,8 @@ function App() {
       <button disabled={saving} type="submit">{saving ? 'Guardando...' : 'Guardar persona'}</button>
     </form></section></div>}
     {activeView === 'movements' && showAccessForm && <section className="form-panel"><div className="panel-heading"><div><span className="eyebrow">MOVIMIENTO</span><h2>Registrar acceso</h2></div><button className="secondary" onClick={() => setShowAccessForm(false)}>Cancelar</button></div>{people.length ? <form className="form-grid" onSubmit={createAccess}>
-      <label>Vehículo (opcional)<select value={selectedVehicleId} onChange={(event) => setSelectedVehicleId(event.target.value)}><option value="">Movimiento peatonal</option>{vehicles.filter((vehicle) => String(vehicle.personId ?? '') === selectedPersonId).map((vehicle) => <option key={vehicle.id} value={vehicle.id}>{vehicle.plate} · {vehicle.person.fullName}</option>)}</select></label>
+      <label>Persona<input value={personSearch} onChange={(event) => setPersonSearch(event.target.value)} placeholder="Buscar por nombre o documento" /><select required value={selectedPersonId} onChange={(event) => { setSelectedPersonId(event.target.value); setSelectedVehicleId(''); }}><option value="">Selecciona una persona</option>{people.filter((person) => person.id === Number(selectedPersonId) || `${person.fullName} ${person.documentNumber ?? ''}`.toLowerCase().includes(personSearch.toLowerCase())).map((person) => <option key={person.id} value={person.id}>{person.fullName} · {person.documentNumber || 'Sin documento'} · {formatPersonLocation(person)}</option>)}</select></label>
+      <label>Vehículo (opcional)<select value={selectedVehicleId} onChange={(event) => { const vehicleId = event.target.value; setSelectedVehicleId(vehicleId); if (vehicleId) { const vehicle = vehicles.find((item) => String(item.id) === vehicleId); if (vehicle) { setSelectedPersonId(String(vehicle.personId)); setPersonSearch(''); } } }}><option value="">Movimiento peatonal</option>{vehicles.map((vehicle) => <option key={vehicle.id} value={vehicle.id}>{vehicle.plate} · {vehicle.person.fullName} · {formatPersonLocation(vehicle.person)}</option>)}</select></label>
       <label>Movimiento<select value={accessType} onChange={(event) => setAccessType(event.target.value as 'ENTRADA' | 'SALIDA')}><option value="ENTRADA">Entrada</option><option value="SALIDA">Salida</option></select></label>
       {supervisorRequired && <><div className="notice form-full">Se requiere autorización de supervisor para este movimiento irregular.</div><label>Correo del supervisor<input type="email" required value={supervisorEmail} onChange={(event) => setSupervisorEmail(event.target.value)} /></label><label>Contraseña del supervisor<input type="password" required value={supervisorPassword} onChange={(event) => setSupervisorPassword(event.target.value)} /></label></>}
       <button disabled={saving} type="submit">{saving ? 'Guardando...' : 'Guardar movimiento'}</button>
@@ -1025,7 +1033,7 @@ function App() {
       <label>¿Quién recibe la encomienda?<input required maxLength={120} value={deliveredToName} onChange={(event) => setDeliveredToName(event.target.value)} placeholder="Nombre de quien retira" /></label>
       <button disabled={saving} type="submit">{saving ? 'Guardando...' : 'Confirmar entrega'}</button>
     </form></section></div>}
-    {activeView === 'movements' && <section className="panel"><div className="panel-heading"><div><span className="eyebrow">ACTIVIDAD</span><h2>Últimos movimientos</h2></div><div className="panel-actions"><span className="live">● En vivo</span><button onClick={() => setShowAccessForm(true)}>Registrar acceso</button></div></div>
+    {activeView === 'movements' && <section className="panel"><div className="panel-heading"><div><span className="eyebrow">ACTIVIDAD</span><h2>Últimos movimientos</h2></div><div className="panel-actions"><span className="live">● En vivo</span><button onClick={openAccessForm}>Registrar acceso</button></div></div>
       {logs.length ? <div className="table"><div className="row movement-row heading"><span>Persona responsable</span><span>Ubicación</span><span>Vehículo</span><span>Movimiento</span><span>Hora</span></div>{logs.map((log) => <div className="row movement-row movement-row-clickable" key={log.id} role="button" tabIndex={0} onClick={() => setSelectedLog(log)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') setSelectedLog(log); }}><strong>{log.person.fullName}</strong><span>{formatPersonLocation(log.person)}</span><span>{log.vehicle ? `${log.vehicle.plate} · Vehículo` : 'Peatonal'}</span><span className={log.accessType === 'ENTRADA' ? 'entry' : 'exit'}>{log.accessType === 'ENTRADA' ? 'Entrada' : 'Salida'}</span><span>{new Date(log.occurredAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></div>)}</div> : <div className="empty">Aún no hay movimientos registrados.</div>}
     </section>}
     {selectedLog && <div className="detail-backdrop" onClick={() => setSelectedLog(null)}><section className="movement-detail" role="dialog" aria-modal="true" aria-labelledby="movement-detail-title" onClick={(event) => event.stopPropagation()}>
