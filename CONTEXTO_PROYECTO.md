@@ -133,6 +133,8 @@ Archivos principales:
   - Bloquear.
   - Solicitar autorización de supervisor.
 - En modo `BLOCK`, dos movimientos consecutivos del mismo tipo se rechazan con `409` (`IRREGULAR_ACCESS`). En modo `SUPERVISOR`, la excepción requiere credenciales válidas y queda asociada al supervisor que la autorizó.
+- Validación del fix (2026-10-28): compilación de API y frontend correcta. Queda pendiente reproducir el caso de Jose Rojas con datos reales; no se alteró el historial de movimientos existente.
+- El escaneo de un vehículo solo acepta propietarios activos dentro de la misma residencia.
 - Reporte de últimos movimientos.
 - Detalle ampliado al seleccionar un movimiento:
   - Persona.
@@ -167,6 +169,8 @@ Archivos principales:
   - Registro mediante formulario modal.
   - Acciones "Entregar" (pide el nombre de quien retira) y "Devolver" (con confirmación).
 - Una encomienda cerrada no se puede volver a modificar desde el flujo operativo; la API responde `409`.
+- El cierre solo actualiza encomiendas `PENDIENTE`, de forma atómica y dentro de la residencia autenticada. Marcar como entregada exige el nombre de quien la recibe; un filtro `status` inválido en la consulta responde `400`.
+- Al iniciar la entrega, el nombre del destinatario se precarga en el campo de quien recibe y puede editarse si retira otra persona.
 - Todavía no se notifica automáticamente al residente cuando llega una encomienda.
 
 ### Formas de captura de movimientos
