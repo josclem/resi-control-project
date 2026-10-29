@@ -76,9 +76,11 @@ Archivos principales:
   - Visitante.
 - Campos principales:
   - Nombre completo.
-  - Apartamento.
+  - Tipo de sector (torre o interior) y su número.
+  - Número de apartamento, separado del sector para poder filtrar ambos datos independientemente.
   - Tipo y número de documento.
   - Teléfono.
+- Las personas nuevas y editadas registran la ubicación por separado. Los registros anteriores conservan sus datos y requieren completar el sector al editarse; no se interpreta ni transforma automáticamente el apartamento antiguo.
 - Validaciones de documentos, teléfonos y registros duplicados.
 - Desactivación lógica mediante `active = false`.
 - Fotografía persistente en `PersonPhoto`.
