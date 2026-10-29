@@ -21,6 +21,18 @@ Usuario inicial de desarrollo: `admin@resicontrol.local` / `Admin123!`. Debe cam
 
 La API queda en `http://localhost:4000` y el frontend en `http://localhost:5173`.
 
+## Flujo de ramas
+
+Usa este flujo para que `main` conserve únicamente cambios probados:
+
+1. **Crear una rama de trabajo** desde la última versión de `qa`. Usa nombres descriptivos, por ejemplo `feature/reportes-encomiendas` o `fix/duplicated-access-movement`.
+2. **Desarrollar y validar** el cambio en esa rama. Ejecuta las comprobaciones pertinentes y haz commits pequeños y descriptivos.
+3. **Integrar en `qa`** mediante un pull request desde la rama de trabajo. Publica/despliega `qa` y prueba allí el comportamiento antes de promoverlo.
+4. **Promover a `main`** mediante un pull request de `qa` a `main`, solo después de confirmar que las pruebas y la validación funcional en `qa` fueron satisfactorias.
+5. Si se encuentran problemas en `qa`, corrígelos en una rama de trabajo y vuelve a integrarlos en `qa`; no promociones a `main` hasta que estén resueltos.
+
+No trabajes directamente sobre `main` ni `qa`. Mantén las ramas actualizadas con el remoto y no incluyas archivos locales, secretos ni artefactos generados en los commits.
+
 ## Modelo inicial
 
 Se separan residentes, visitantes y usuarios del sistema. Un residente o visitante puede tener múltiples registros de acceso. Cada registro conserva tipo de acceso, fecha/hora, nombre y apartamento. Las encomiendas se asocian a una persona y conservan tipo, estado, remitente, guía, fecha de recepción y datos de entrega. Los nombres de perfiles son datos de configuración del dominio y pueden cambiarse más adelante sin afectar el flujo.
