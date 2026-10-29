@@ -877,7 +877,7 @@ function App() {
         body: JSON.stringify({ mode: irregularMode }),
       });
       if (!response.ok) throw new Error('No se pudo guardar la configuración.');
-      setShowSettings(false); setNotice('Configuración de movimientos irregulares guardada.');
+      setNotice('Configuración de movimientos irregulares guardada.');
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'No se pudo guardar la configuración.'); }
     finally { setSaving(false); }
   }
@@ -939,11 +939,16 @@ function App() {
       </div>
       <button disabled={saving} type="submit">{saving ? 'Guardando...' : editingVehicleId ? 'Actualizar vehículo' : 'Guardar vehículo'}</button>
     </form></section></div>}
-    {activeView === 'settings' && showSettings && <section className="form-panel"><div className="panel-heading"><div><span className="eyebrow">CONFIGURACIÓN</span><h2>Movimientos irregulares</h2></div><button onClick={() => setShowSettings(false)}>Cancelar</button></div><form className="form-grid" onSubmit={saveSettings}>
-      <label>Comportamiento<select value={irregularMode} onChange={(event) => setIrregularMode(event.target.value as 'BLOCK' | 'SUPERVISOR')}><option value="BLOCK">Bloquear movimiento repetido</option><option value="SUPERVISOR">Solicitar autorización de supervisor</option></select></label>
-      <label>Forma de captura de movimientos<select value={accessCaptureMode} onChange={(event) => setAccessCaptureMode(event.target.value as AccessCaptureMode)}><option value="MANUAL">Búsqueda manual</option><option value="BARCODE">Código de barras</option><option value="QR">Código QR</option><option value="FINGERPRINT">Huella dactilar (próximamente)</option></select></label>
-      <button disabled={saving} type="submit">{saving ? 'Guardando...' : 'Guardar configuración'}</button>
-    </form><form className="form-grid" onSubmit={saveCaptureMode}><button disabled={saving} type="submit">Guardar forma de captura</button></form></section>}
+    {activeView === 'settings' && showSettings && <section className="form-panel"><div className="panel-heading"><div><span className="eyebrow">CONFIGURACIÓN</span><h2>Movimientos irregulares</h2></div><button type="button" onClick={() => setShowSettings(false)}>Cancelar</button></div><div className="form-grid">
+      <form style={{ display: 'grid', alignContent: 'start', gap: 16 }} onSubmit={saveSettings}>
+        <label>Comportamiento<select value={irregularMode} onChange={(event) => setIrregularMode(event.target.value as 'BLOCK' | 'SUPERVISOR')}><option value="BLOCK">Bloquear movimiento repetido</option><option value="SUPERVISOR">Solicitar autorización de supervisor</option></select></label>
+        <button style={{ width: '100%', alignSelf: 'stretch' }} disabled={saving} type="submit">{saving ? 'Guardando...' : 'Guardar configuración'}</button>
+      </form>
+      <form style={{ display: 'grid', alignContent: 'start', gap: 16 }} onSubmit={saveCaptureMode}>
+        <label>Forma de captura de movimientos<select value={accessCaptureMode} onChange={(event) => setAccessCaptureMode(event.target.value as AccessCaptureMode)}><option value="MANUAL">Búsqueda manual</option><option value="BARCODE">Código de barras</option><option value="QR">Código QR</option><option value="FINGERPRINT">Huella dactilar (próximamente)</option></select></label>
+        <button style={{ width: '100%', alignSelf: 'stretch' }} disabled={saving} type="submit">{saving ? 'Guardando...' : 'Guardar forma de captura'}</button>
+      </form>
+    </div></section>}
     {activeView === 'settings' && showSettings && (userRole === 'ADMINISTRADOR' || userRole === 'SUPER_ADMINISTRADOR') && <section className="form-panel"><div className="panel-heading"><div><span className="eyebrow">RESIDENCIA</span><h2>Personalización</h2></div></div><form className="form-grid" onSubmit={saveResidence}>
       <label>Nombre de la residencia<input required maxLength={120} value={residenceName} onChange={(event) => setResidenceName(event.target.value)} /></label>
       <div className="logo-field"><label>Logo<input type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" onChange={(event) => { const file = event.target.files?.[0] ?? null; if (!file) return; const validationError = validateResidenceLogo(file); if (validationError) { setError(validationError); event.target.value = ''; setResidenceLogo(null); setResidenceLogoPreview(''); return; } setError(''); setResidenceLogo(file); setResidenceLogoPreview(URL.createObjectURL(file)); setRemoveResidenceLogo(false); }} /></label>
