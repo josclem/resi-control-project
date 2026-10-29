@@ -42,7 +42,12 @@ const deliveryCreateSchema = z.object({
 const deliveryStatusSchema = z.object({
   status: z.nativeEnum(DeliveryStatus),
   deliveredToName: z.string().trim().max(120).optional(),
+}).superRefine((value, context) => {
+  if (value.status === DeliveryStatus.ENTREGADA && !value.deliveredToName) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['deliveredToName'], message: 'El nombre de quien recibe la encomienda es obligatorio.' });
+  }
 });
+const deliveryStatusFilterSchema = z.nativeEnum(DeliveryStatus);
 const photoUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 2 * 1024 * 1024 },
@@ -351,8 +356,13 @@ const deliveryRelations = {
 
 app.get('/api/deliveries', requireAuth, async (req: AuthenticatedRequest, res, next) => {
   try {
-    const requested = typeof req.query.status === 'string' ? req.query.status.toUpperCase() : '';
-    const status = (Object.values(DeliveryStatus) as string[]).includes(requested) ? (requested as DeliveryStatus) : undefined;
+    let status: DeliveryStatus | undefined;
+    if (req.query.status !== undefined) {
+      if (typeof req.query.status !== 'string') return res.status(400).json({ message: 'Estado de encomienda inválido.' });
+      const parsedStatus = deliveryStatusFilterSchema.safeParse(req.query.status.toUpperCase());
+      if (!parsedStatus.success) return res.status(400).json({ message: 'Estado de encomienda inválido.' });
+      status = parsedStatus.data;
+    }
     const deliveries = await prisma.delivery.findMany({
       where: { residenceId: req.user!.residenceId, ...(status ? { status } : {}) },
       orderBy: { receivedAt: 'desc' },
@@ -396,23 +406,44 @@ app.put('/api/deliveries/:id/status', requireAuth, async (req: AuthenticatedRequ
   try {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: 'Identificador inválido.' });
-    const input = deliveryStatusSchema.parse(req.body);
+    const parsedInput = deliveryStatusSchema.safeParse(req.body);
+    if (!parsedInput.success) {
+      return res.status(400).json({
+        message: parsedInput.error.issues[0]?.message ?? 'Datos inválidos.',
+        issues: parsedInput.error.issues,
+      });
+    }
+    const input = parsedInput.data;
     if (input.status === DeliveryStatus.PENDIENTE) return res.status(400).json({ message: 'La encomienda ya está pendiente.' });
-    const existing = await prisma.delivery.findFirst({ where: { id, residenceId: req.user!.residenceId } });
-    if (!existing) return res.status(404).json({ message: 'Encomienda no encontrada.' });
-    if (existing.status !== DeliveryStatus.PENDIENTE) return res.status(409).json({ message: 'La encomienda ya fue cerrada.' });
     const delivered = input.status === DeliveryStatus.ENTREGADA;
-    const delivery = await prisma.delivery.update({
-      where: { id },
-      data: {
-        status: input.status,
-        deliveredAt: delivered ? new Date() : null,
-        deliveredById: delivered ? req.user!.id : null,
-        deliveredToName: input.deliveredToName || null,
-      },
-      include: deliveryRelations,
+    const result = await prisma.$transaction(async (transaction) => {
+      const update = await transaction.delivery.updateMany({
+        where: { id, residenceId: req.user!.residenceId, status: DeliveryStatus.PENDIENTE },
+        data: {
+          status: input.status,
+          deliveredAt: delivered ? new Date() : null,
+          deliveredById: delivered ? req.user!.id : null,
+          deliveredToName: delivered ? input.deliveredToName ?? null : null,
+        },
+      });
+      if (!update.count) {
+        const existing = await transaction.delivery.findFirst({
+          where: { id, residenceId: req.user!.residenceId },
+          select: { id: true },
+        });
+        return existing ? { status: 409 as const } : { status: 404 as const };
+      }
+
+      const delivery = await transaction.delivery.findFirst({
+        where: { id, residenceId: req.user!.residenceId },
+        include: deliveryRelations,
+      });
+      if (!delivery) throw new Error('La encomienda desapareció durante su actualización.');
+      return { status: 200 as const, delivery };
     });
-    return res.json(delivery);
+    if (result.status === 404) return res.status(404).json({ message: 'Encomienda no encontrada.' });
+    if (result.status === 409) return res.status(409).json({ message: 'La encomienda ya fue cerrada.' });
+    return res.json(result.delivery);
   } catch (error) {
     return next(error);
   }
@@ -490,7 +521,15 @@ app.post('/api/people', requireAuth, allowRoles(UserRole.SUPER_ADMINISTRADOR, Us
 app.post('/api/access/scan', requireAuth, async (req: AuthenticatedRequest, res, next) => {
   try {
     const { code } = accessScanSchema.parse(req.body);
-    const vehicle = await prisma.vehicle.findFirst({ where: { accessCode: code, residenceId: req.user!.residenceId, active: true }, include: { person: true } });
+    const vehicle = await prisma.vehicle.findFirst({
+      where: {
+        accessCode: code,
+        residenceId: req.user!.residenceId,
+        active: true,
+        person: { is: { residenceId: req.user!.residenceId, active: true } },
+      },
+      include: { person: true },
+    });
     const person = vehicle ? vehicle.person : await prisma.person.findFirst({ where: { accessCode: code, residenceId: req.user!.residenceId, active: true } });
     if (!person) return res.status(404).json({ message: 'Código no reconocido.' });
     const lastAccess = await prisma.accessLog.findFirst({
