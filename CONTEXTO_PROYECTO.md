@@ -127,6 +127,7 @@ Archivos principales:
 - Registro de entradas y salidas.
 - Movimientos peatonales.
 - Movimientos asociados a un vehículo.
+- En el formulario manual de acceso se busca y selecciona a la persona por nombre o documento; también se puede buscar el vehículo por placa o propietario. Al seleccionar un vehículo queda asociada automáticamente su persona propietaria. El escaneo sigue disponible según la configuración.
 - Validación de que el vehículo pertenezca a la persona seleccionada.
 - Control de movimientos repetidos:
   - Por persona para movimientos peatonales.

@@ -4,6 +4,7 @@ import JsBarcode from 'jsbarcode';
 import QRCode from 'qrcode';
 import { FormEvent, StrictMode, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import './access-search.css';
 import './styles.css';
 
 type BuildingSectionType = 'TORRE' | 'INTERIOR';
@@ -50,6 +51,9 @@ function formatBuildingSection(person: PersonLocation) {
 }
 function formatPersonLocation(person: PersonLocation) {
   return `${formatBuildingSection(person)} · Apto. ${person.apartmentNumber}`;
+}
+function normalizePersonSearch(value: string) {
+  return value.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
 const api = 'http://localhost:4000';
 const getToken = () => localStorage.getItem('token') ?? '';
@@ -186,6 +190,7 @@ function App() {
   const [selectedPersonId, setSelectedPersonId] = useState('');
   const [selectedVehicleId, setSelectedVehicleId] = useState('');
   const [personSearch, setPersonSearch] = useState('');
+  const [vehicleSearch, setVehicleSearch] = useState('');
   const [accessCaptureMode, setAccessCaptureMode] = useState<AccessCaptureMode>('MANUAL');
   const [scannerValue, setScannerValue] = useState('');
   const [scannerOpen, setScannerOpen] = useState(false);
@@ -779,6 +784,22 @@ function App() {
     } finally { setSaving(false); }
   }
 
+  function openAccessForm() {
+    setSelectedPersonId('');
+    setSelectedVehicleId('');
+    setPersonSearch('');
+    setVehicleSearch('');
+    setShowAccessForm(true);
+  }
+
+  const matchingAccessPeople = people.filter((person) =>
+    normalizePersonSearch(`${person.fullName} ${person.documentNumber ?? ''}`).includes(normalizePersonSearch(personSearch.trim())),
+  );
+  const matchingAccessVehicles = vehicles.filter((vehicle) =>
+    normalizePersonSearch(`${vehicle.plate} ${vehicle.person.fullName} ${formatPersonLocation(vehicle.person)}`)
+      .includes(normalizePersonSearch(vehicleSearch.trim())),
+  );
+
   async function createDelivery(event: FormEvent) {
     event.preventDefault();
     if (!deliveryPersonId) { setError('Selecciona el destinatario de la encomienda.'); return; }
@@ -990,7 +1011,8 @@ function App() {
       <button disabled={saving} type="submit">{saving ? 'Guardando...' : 'Guardar persona'}</button>
     </form></section></div>}
     {activeView === 'movements' && showAccessForm && <section className="form-panel"><div className="panel-heading"><div><span className="eyebrow">MOVIMIENTO</span><h2>Registrar acceso</h2></div><button className="secondary" onClick={() => setShowAccessForm(false)}>Cancelar</button></div>{people.length ? <form className="form-grid" onSubmit={createAccess}>
-      <label>Vehículo (opcional)<select value={selectedVehicleId} onChange={(event) => setSelectedVehicleId(event.target.value)}><option value="">Movimiento peatonal</option>{vehicles.filter((vehicle) => String(vehicle.personId ?? '') === selectedPersonId).map((vehicle) => <option key={vehicle.id} value={vehicle.id}>{vehicle.plate} · {vehicle.person.fullName}</option>)}</select></label>
+      <label>Persona<input role="combobox" aria-autocomplete="list" aria-controls="access-person-results" aria-expanded={personSearch.trim().length > 0 && !selectedPersonId} value={personSearch} onChange={(event) => { setPersonSearch(event.target.value); setSelectedPersonId(''); setSelectedVehicleId(''); setVehicleSearch(''); }} onKeyDown={(event) => { if (event.key === 'Enter' && personSearch.trim() && !selectedPersonId && matchingAccessPeople.length > 0) { event.preventDefault(); const person = matchingAccessPeople[0]; setSelectedPersonId(String(person.id)); setPersonSearch(person.fullName); } }} placeholder="Buscar por nombre o documento" />{personSearch.trim() && !selectedPersonId && <div id="access-person-results" className="access-search-results" role="listbox">{matchingAccessPeople.length ? matchingAccessPeople.slice(0, 8).map((person) => <button key={person.id} type="button" role="option" aria-selected="false" className="access-search-result" onClick={() => { setSelectedPersonId(String(person.id)); setSelectedVehicleId(''); setPersonSearch(person.fullName); setVehicleSearch(''); }}>{person.fullName} · {person.documentNumber || 'Sin documento'} · {formatPersonLocation(person)}</button>) : <span className="access-search-empty">No se encontraron personas.</span>}</div>}</label>
+      <label>Vehículo (opcional)<input role="combobox" aria-autocomplete="list" aria-controls="access-vehicle-results" aria-expanded={vehicleSearch.trim().length > 0 && !selectedVehicleId} value={vehicleSearch} onChange={(event) => { setVehicleSearch(event.target.value); setSelectedVehicleId(''); }} onKeyDown={(event) => { if (event.key === 'Enter' && vehicleSearch.trim() && !selectedVehicleId && matchingAccessVehicles.length > 0) { event.preventDefault(); const vehicle = matchingAccessVehicles[0]; setSelectedVehicleId(String(vehicle.id)); setSelectedPersonId(String(vehicle.personId)); setPersonSearch(vehicle.person.fullName); setVehicleSearch(vehicle.plate); } }} placeholder="Buscar por placa o propietario" />{vehicleSearch.trim() && !selectedVehicleId && <div id="access-vehicle-results" className="access-search-results" role="listbox">{matchingAccessVehicles.length ? matchingAccessVehicles.slice(0, 8).map((vehicle) => <button key={vehicle.id} type="button" role="option" aria-selected="false" className="access-search-result" onClick={() => { setSelectedVehicleId(String(vehicle.id)); setSelectedPersonId(String(vehicle.personId)); setPersonSearch(vehicle.person.fullName); setVehicleSearch(vehicle.plate); }}>{vehicle.plate} · {vehicle.person.fullName} · {formatPersonLocation(vehicle.person)}</button>) : <span className="access-search-empty">No se encontraron vehículos.</span>}</div>}</label>
       <label>Movimiento<select value={accessType} onChange={(event) => setAccessType(event.target.value as 'ENTRADA' | 'SALIDA')}><option value="ENTRADA">Entrada</option><option value="SALIDA">Salida</option></select></label>
       {supervisorRequired && <><div className="notice form-full">Se requiere autorización de supervisor para este movimiento irregular.</div><label>Correo del supervisor<input type="email" required value={supervisorEmail} onChange={(event) => setSupervisorEmail(event.target.value)} /></label><label>Contraseña del supervisor<input type="password" required value={supervisorPassword} onChange={(event) => setSupervisorPassword(event.target.value)} /></label></>}
       <button disabled={saving} type="submit">{saving ? 'Guardando...' : 'Guardar movimiento'}</button>
@@ -1025,7 +1047,7 @@ function App() {
       <label>¿Quién recibe la encomienda?<input required maxLength={120} value={deliveredToName} onChange={(event) => setDeliveredToName(event.target.value)} placeholder="Nombre de quien retira" /></label>
       <button disabled={saving} type="submit">{saving ? 'Guardando...' : 'Confirmar entrega'}</button>
     </form></section></div>}
-    {activeView === 'movements' && <section className="panel"><div className="panel-heading"><div><span className="eyebrow">ACTIVIDAD</span><h2>Últimos movimientos</h2></div><div className="panel-actions"><span className="live">● En vivo</span><button onClick={() => setShowAccessForm(true)}>Registrar acceso</button></div></div>
+    {activeView === 'movements' && <section className="panel"><div className="panel-heading"><div><span className="eyebrow">ACTIVIDAD</span><h2>Últimos movimientos</h2></div><div className="panel-actions"><span className="live">● En vivo</span><button onClick={openAccessForm}>Registrar acceso</button></div></div>
       {logs.length ? <div className="table"><div className="row movement-row heading"><span>Persona responsable</span><span>Ubicación</span><span>Vehículo</span><span>Movimiento</span><span>Hora</span></div>{logs.map((log) => <div className="row movement-row movement-row-clickable" key={log.id} role="button" tabIndex={0} onClick={() => setSelectedLog(log)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') setSelectedLog(log); }}><strong>{log.person.fullName}</strong><span>{formatPersonLocation(log.person)}</span><span>{log.vehicle ? `${log.vehicle.plate} · Vehículo` : 'Peatonal'}</span><span className={log.accessType === 'ENTRADA' ? 'entry' : 'exit'}>{log.accessType === 'ENTRADA' ? 'Entrada' : 'Salida'}</span><span>{new Date(log.occurredAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></div>)}</div> : <div className="empty">Aún no hay movimientos registrados.</div>}
     </section>}
     {selectedLog && <div className="detail-backdrop" onClick={() => setSelectedLog(null)}><section className="movement-detail" role="dialog" aria-modal="true" aria-labelledby="movement-detail-title" onClick={(event) => event.stopPropagation()}>
