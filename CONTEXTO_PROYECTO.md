@@ -182,6 +182,7 @@ La configuración por residencia permite seleccionar:
 - Código de barras.
 - Código QR.
 - Huella dactilar, actualmente marcada como próximamente.
+- Los ajustes de comportamiento irregular y forma de captura se guardan por separado desde sus respectivos botones; guardar uno mantiene abierto el panel para guardar el otro.
 
 #### Búsqueda manual
 
