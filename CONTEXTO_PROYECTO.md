@@ -128,9 +128,11 @@ Archivos principales:
 - Control de movimientos repetidos:
   - Por persona para movimientos peatonales.
   - Por vehículo para movimientos vehiculares.
+- La API serializa el registro de movimientos por persona para que la validación del último movimiento y la creación sean atómicas, incluso si llegan solicitudes simultáneas.
 - Modos para movimientos irregulares:
   - Bloquear.
   - Solicitar autorización de supervisor.
+- En modo `BLOCK`, dos movimientos consecutivos del mismo tipo se rechazan con `409` (`IRREGULAR_ACCESS`). En modo `SUPERVISOR`, la excepción requiere credenciales válidas y queda asociada al supervisor que la autorizó.
 - Reporte de últimos movimientos.
 - Detalle ampliado al seleccionar un movimiento:
   - Persona.
