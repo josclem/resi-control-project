@@ -23,15 +23,27 @@ La API queda en `http://localhost:4000` y el frontend en `http://localhost:5173`
 
 ## Pruebas automatizadas
 
-Actualmente no hay suites de pruebas unitarias ni de integración configuradas; `npm run build` valida compilación y tipos, pero no sustituye pruebas de comportamiento. Incorporar pruebas automatizadas es el siguiente trabajo técnico prioritario antes de seguir ampliando funcionalidades.
+Desde la raíz del proyecto:
 
-- **Unitarias:** probar funciones puras y reglas de negocio pequeñas sin conectarse a la base de datos.
-- **Integración:** probar rutas y persistencia de la API con PostgreSQL aislado para pruebas; nunca usar la base de desarrollo o producción.
-- **Primeros flujos:** movimientos duplicados y autorización de supervisor; cierre de encomiendas y validación de quién recibe; validación de acceso por residencia y permisos.
-- **Ejecución:** cada pull request debe pasar las pruebas y `npm run build`. Las pruebas de integración deben preparar y limpiar sus propios datos de forma repetible.
-- **Diseño para probar:** separar la creación de la aplicación Express del arranque del servidor para poder probar la API sin abrir un puerto real.
+- `npm test` ejecuta pruebas unitarias sin conectarse a PostgreSQL.
+- `npm run test:integration` ejecuta pruebas de rutas y persistencia; requiere una base PostgreSQL exclusiva llamada `resi_control_test`.
+- `npm run build` valida tipos y compila API y frontend.
 
-El runner y las dependencias de pruebas se incorporarán en la rama dedicada a esta tarea, junto con scripts documentados para ejecutar las suites.
+En cada pull request hacia `main` y en cada push a `main`, GitHub Actions ejecuta las tres validaciones usando PostgreSQL 16 aislado para las pruebas de integración.
+
+Para preparar la base de integración en PowerShell, configura `DATABASE_URL_TEST` con las credenciales de PostgreSQL y el nombre reservado, y úsala explícitamente al crear el esquema:
+
+```powershell
+$env:DATABASE_URL_TEST = "postgresql://postgres:postgres@localhost:5432/resi_control_test"
+$env:DATABASE_URL = $env:DATABASE_URL_TEST
+npm run db:push
+Remove-Item Env:DATABASE_URL
+npm run test:integration
+```
+
+La suite de integración no usa el `.env` de desarrollo: requiere `DATABASE_URL_TEST` y rechaza cualquier base cuyo nombre no sea exactamente `resi_control_test`; también bloquea la ejecución con `NODE_ENV=production`. Sus fixtures son únicos por ejecución y se limpian al finalizar. Nunca configures la URL de desarrollo o producción en `DATABASE_URL_TEST`.
+
+La API exporta `createApp` desde `apps/api/src/server.ts`; el arranque que escucha en el puerto está separado en `apps/api/src/index.ts`, para que las pruebas HTTP no abran un puerto real.
 
 ## Flujo de ramas
 

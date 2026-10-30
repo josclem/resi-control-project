@@ -1,53 +1,60 @@
-import 'dotenv/config';
 import express, { NextFunction, Request, Response } from 'express';
 import multer from 'multer';
 import cors from 'cors';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
-import { PrismaClient, UserRole, PersonType, BuildingSectionType, AccessType, VehicleType, DeliveryType, DeliveryStatus } from '@prisma/client';
+import { AccessType, PersonType, PrismaClient, UserRole, DeliveryStatus } from '@prisma/client';
 import { z } from 'zod';
-
-const prisma = new PrismaClient();
-const app = express();
-const port = Number(process.env.PORT ?? 4000);
-const jwtSecret: string = process.env.JWT_SECRET ?? '';
-
-if (!jwtSecret) throw new Error('JWT_SECRET es obligatorio');
+import {
+  accessSchema,
+  accessScanSchema,
+  accessCaptureModeSchema,
+  deliveryCreateSchema,
+  deliveryStatusFilterSchema,
+  deliveryStatusSchema,
+  irregularAccessModeSchema,
+  loginSchema,
+  personSchema,
+  residenceSchema,
+  supervisorSchema,
+  vehicleSchema,
+  formatPhone,
+  normalizeDocumentNumber,
+} from './validation.js';
 
 type AuthenticatedRequest = Request & { user?: { id: number; role: UserRole; residenceId: number } };
 
-app.use(cors({ origin: process.env.WEB_ORIGIN ?? 'http://localhost:5173' }));
-app.use(express.json());
-app.use((_req, res, next) => {
-  // Los datos de la API cambian (códigos de acceso, movimientos) y no deben servirse desde caché.
-  res.setHeader('Cache-Control', 'no-store');
-  next();
-});
+function createRequireAuth(prisma: PrismaClient, jwtSecret: string) {
+  return async function requireAuth(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    const header = req.headers.authorization;
+    if (!header?.startsWith('Bearer ')) return res.status(401).json({ message: 'Autenticación requerida' });
+    try {
+      const claims = jwt.verify(header.slice(7), jwtSecret) as { id?: number };
+      if (!claims.id) return res.status(401).json({ message: 'Sesión inválida. Inicia sesión nuevamente.' });
+      const user = await prisma.user.findUnique({ where: { id: claims.id }, select: { id: true, role: true, residenceId: true, active: true } });
+      if (!user?.active) return res.status(401).json({ message: 'Usuario inactivo o inexistente.' });
+      req.user = { id: user.id, role: user.role, residenceId: user.residenceId };
+      return next();
+    } catch {
+      return res.status(401).json({ message: 'Token inválido o expirado' });
+    }
+  };
+}
 
-const loginSchema = z.object({ email: z.string().email(), password: z.string().min(1) });
-const accessSchema = z.object({
-  personId: z.number().int().positive(),
-  vehicleId: z.number().int().positive().optional(),
-  accessType: z.nativeEnum(AccessType),
-});
-const accessScanSchema = z.object({ code: z.string().trim().min(1) });
-const deliveryCreateSchema = z.object({
-  personId: z.number().int().positive(),
-  type: z.nativeEnum(DeliveryType),
-  courier: z.string().trim().max(120).optional(),
-  description: z.string().trim().max(300).optional(),
-  trackingCode: z.string().trim().max(120).optional(),
-  notes: z.string().trim().max(500).optional(),
-});
-const deliveryStatusSchema = z.object({
-  status: z.nativeEnum(DeliveryStatus),
-  deliveredToName: z.string().trim().max(120).optional(),
-}).superRefine((value, context) => {
-  if (value.status === DeliveryStatus.ENTREGADA && !value.deliveredToName) {
-    context.addIssue({ code: z.ZodIssueCode.custom, path: ['deliveredToName'], message: 'El nombre de quien recibe la encomienda es obligatorio.' });
-  }
-});
-const deliveryStatusFilterSchema = z.nativeEnum(DeliveryStatus);
+export function createApp(prisma: PrismaClient, jwtSecret: string) {
+  if (!jwtSecret) throw new Error('JWT_SECRET es obligatorio');
+
+  const app = express();
+  const requireAuth = createRequireAuth(prisma, jwtSecret);
+
+  app.use(cors({ origin: process.env.WEB_ORIGIN ?? 'http://localhost:5173' }));
+  app.use(express.json());
+  app.use((_req, res, next) => {
+    // Los datos de la API cambian (códigos de acceso, movimientos) y no deben servirse desde caché.
+    res.setHeader('Cache-Control', 'no-store');
+    next();
+  });
+
 const photoUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 2 * 1024 * 1024 },
@@ -57,24 +64,6 @@ const photoUpload = multer({
 function photoData(file: Express.Multer.File) {
   return { data: new Uint8Array(file.buffer) as Uint8Array<ArrayBuffer>, mimeType: file.mimetype, fileName: file.originalname, size: file.size };
 }
-const personSchema = z.object({
-  type: z.nativeEnum(PersonType),
-  fullName: z.string().trim().min(2),
-  buildingSectionType: z.nativeEnum(BuildingSectionType),
-  buildingSectionNumber: z.string().trim().min(1).max(30),
-  apartmentNumber: z.string().trim().min(1),
-  documentTypeId: z.number().int().positive().optional(),
-  documentNumber: z.string().trim().min(1).optional(),
-  phone: z.string().trim().optional(),
-  biometricRef: z.string().trim().optional(),
-}).superRefine((value, context) => {
-  if (value.documentNumber && !value.documentTypeId) {
-    context.addIssue({ code: z.ZodIssueCode.custom, path: ['documentTypeId'], message: 'El tipo de documento es obligatorio.' });
-  }
-  if (value.documentTypeId && !value.documentNumber) {
-    context.addIssue({ code: z.ZodIssueCode.custom, path: ['documentNumber'], message: 'El número de documento es obligatorio.' });
-  }
-});
 
 app.put('/api/people/:id', requireAuth, allowRoles(UserRole.SUPER_ADMINISTRADOR, UserRole.ADMINISTRADOR), async (req: AuthenticatedRequest, res, next) => {
   try {
@@ -121,19 +110,6 @@ app.delete('/api/people/:id/photo', requireAuth, allowRoles(UserRole.SUPER_ADMIN
   try { await prisma.personPhoto.deleteMany({ where: { personId: Number(req.params.id), person: { residenceId: req.user!.residenceId } } }); return res.status(204).end(); }
   catch (error) { return next(error); }
 });
-const irregularAccessModeSchema = z.enum(['BLOCK', 'SUPERVISOR']);
-const accessCaptureModeSchema = z.enum(['MANUAL', 'BARCODE', 'QR', 'FINGERPRINT']);
-const supervisorSchema = z.object({ email: z.string().email(), password: z.string().min(1) });
-const residenceSchema = z.object({ name: z.string().trim().min(2).max(120) });
-const vehicleSchema = z.object({
-  plate: z.string().trim().min(5).max(10),
-  type: z.nativeEnum(VehicleType),
-  personId: z.number().int().positive(),
-  brand: z.string().trim().max(50).optional(),
-  model: z.string().trim().max(50).optional(),
-  color: z.string().trim().max(30).optional(),
-});
-
 app.put('/api/vehicles/:id', requireAuth, allowRoles(UserRole.SUPER_ADMINISTRADOR, UserRole.ADMINISTRADOR), async (req: AuthenticatedRequest, res, next) => {
   try {
     const input = vehicleSchema.parse(req.body);
@@ -183,32 +159,6 @@ const logoUpload = multer({
   limits: { fileSize: 2 * 1024 * 1024 },
   fileFilter: (_req, file, callback) => callback(null, ['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype)),
 });
-
-function formatPhone(phone: string) {
-  const digits = phone.replace(/\D/g, '');
-  const national = digits.startsWith('57') && digits.length === 12 ? digits.slice(2) : digits;
-  if (national.length !== 10) throw new Error('El teléfono debe tener 10 dígitos para Colombia.');
-  return `(+57) ${national.slice(0, 3)} ${national.slice(3, 6)} ${national.slice(6)}`;
-}
-
-function normalizeDocumentNumber(documentNumber: string) {
-  return documentNumber.replace(/[\s.-]/g, '').toUpperCase();
-}
-
-async function requireAuth(req: AuthenticatedRequest, res: Response, next: NextFunction) {
-  const header = req.headers.authorization;
-  if (!header?.startsWith('Bearer ')) return res.status(401).json({ message: 'Autenticación requerida' });
-  try {
-    const claims = jwt.verify(header.slice(7), jwtSecret) as { id?: number };
-    if (!claims.id) return res.status(401).json({ message: 'Sesión inválida. Inicia sesión nuevamente.' });
-    const user = await prisma.user.findUnique({ where: { id: claims.id }, select: { id: true, role: true, residenceId: true, active: true } });
-    if (!user?.active) return res.status(401).json({ message: 'Usuario inactivo o inexistente.' });
-    req.user = { id: user.id, role: user.role, residenceId: user.residenceId };
-    return next();
-  } catch {
-    return res.status(401).json({ message: 'Token inválido o expirado' });
-  }
-}
 
 function allowRoles(...roles: UserRole[]) {
   return (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
@@ -622,4 +572,5 @@ app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
   return res.status(500).json({ message: 'Error interno del servidor' });
 });
 
-app.listen(port, () => console.log(`Resi Control API escuchando en http://localhost:${port}`));
+  return app;
+}
