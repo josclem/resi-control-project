@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import { randomUUID } from 'node:crypto';
-import { AccessType, BuildingSectionType, PersonType, PrismaClient, UserRole } from '@prisma/client';
+import { AccessType, BuildingSectionType, DeliveryStatus, DeliveryType, PersonType, PrismaClient, UserRole } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import request from 'supertest';
@@ -161,20 +161,20 @@ describe('POST /api/access', () => {
     const created = await request(app)
       .post('/api/deliveries')
       .set('Authorization', `Bearer ${guardToken}`)
-      .send({ personId, type: 'PAQUETE' });
+      .send({ personId, type: DeliveryType.PAQUETE });
     expect(created.status).toBe(201);
 
     const statusUrl = `/api/deliveries/${created.body.id}/status`;
     const missingName = await request(app)
       .put(statusUrl)
       .set('Authorization', `Bearer ${guardToken}`)
-      .send({ status: 'ENTREGADA' });
+      .send({ status: DeliveryStatus.ENTREGADA });
     expect(missingName.status).toBe(400);
 
     const delivered = await request(app)
       .put(statusUrl)
       .set('Authorization', `Bearer ${guardToken}`)
-      .send({ status: 'ENTREGADA', deliveredToName: 'Ana' });
+      .send({ status: DeliveryStatus.ENTREGADA, deliveredToName: 'Ana' });
     expect(delivered.status).toBe(200);
     expect(delivered.body.deliveredToName).toBe('Ana');
     expect(delivered.body.deliveredById).toBe(guardId);
@@ -182,8 +182,32 @@ describe('POST /api/access', () => {
     const repeatedClose = await request(app)
       .put(statusUrl)
       .set('Authorization', `Bearer ${guardToken}`)
-      .send({ status: 'ENTREGADA', deliveredToName: 'Ana' });
+      .send({ status: DeliveryStatus.ENTREGADA, deliveredToName: 'Ana' });
     expect(repeatedClose.status).toBe(409);
+  });
+
+  it('permite solo un cierre cuando dos solicitudes compiten simultáneamente', async () => {
+    const created = await request(app)
+      .post('/api/deliveries')
+      .set('Authorization', `Bearer ${guardToken}`)
+      .send({ personId, type: DeliveryType.PAQUETE });
+    expect(created.status).toBe(201);
+
+    const statusUrl = `/api/deliveries/${created.body.id}/status`;
+    const responses = await Promise.all([
+      request(app)
+        .put(statusUrl)
+        .set('Authorization', `Bearer ${guardToken}`)
+        .send({ status: DeliveryStatus.ENTREGADA, deliveredToName: 'Ana' }),
+      request(app)
+        .put(statusUrl)
+        .set('Authorization', `Bearer ${guardToken}`)
+        .send({ status: DeliveryStatus.DEVUELTA }),
+    ]);
+
+    expect(responses.map(({ status }) => status).sort()).toEqual([200, 409]);
+    const finalDelivery = await prisma.delivery.findUnique({ where: { id: created.body.id } });
+    expect([DeliveryStatus.ENTREGADA, DeliveryStatus.DEVUELTA]).toContain(finalDelivery?.status);
   });
 
   it('rechaza filtros de encomiendas inválidos', async () => {
