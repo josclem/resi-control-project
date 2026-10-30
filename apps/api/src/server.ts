@@ -18,11 +18,13 @@ import {
   residenceSchema,
   supervisorSchema,
   vehicleSchema,
+  whatsappPhoneSchema,
   formatPhone,
   normalizeDocumentNumber,
+  normalizeWhatsAppPhone,
 } from './validation.js';
 
-type AuthenticatedRequest = Request & { user?: { id: number; role: UserRole; residenceId: number } };
+type AuthenticatedRequest = Request & { user?: { id: number; role: UserRole; residenceId: number; personId: number | null } };
 
 function createRequireAuth(prisma: PrismaClient, jwtSecret: string) {
   return async function requireAuth(req: AuthenticatedRequest, res: Response, next: NextFunction) {
@@ -31,9 +33,9 @@ function createRequireAuth(prisma: PrismaClient, jwtSecret: string) {
     try {
       const claims = jwt.verify(header.slice(7), jwtSecret) as { id?: number };
       if (!claims.id) return res.status(401).json({ message: 'Sesión inválida. Inicia sesión nuevamente.' });
-      const user = await prisma.user.findUnique({ where: { id: claims.id }, select: { id: true, role: true, residenceId: true, active: true } });
+      const user = await prisma.user.findUnique({ where: { id: claims.id }, select: { id: true, role: true, residenceId: true, personId: true, active: true } });
       if (!user?.active) return res.status(401).json({ message: 'Usuario inactivo o inexistente.' });
-      req.user = { id: user.id, role: user.role, residenceId: user.residenceId };
+      req.user = { id: user.id, role: user.role, residenceId: user.residenceId, personId: user.personId };
       return next();
     } catch {
       return res.status(401).json({ message: 'Token inválido o expirado' });
@@ -46,6 +48,8 @@ export function createApp(prisma: PrismaClient, jwtSecret: string) {
 
   const app = express();
   const requireAuth = createRequireAuth(prisma, jwtSecret);
+  const requireStaff = allowRoles(UserRole.SUPER_ADMINISTRADOR, UserRole.ADMINISTRADOR, UserRole.VIGILANTE);
+  const requireResident = allowRoles(UserRole.RESIDENTE);
 
   app.use(cors({ origin: process.env.WEB_ORIGIN ?? 'http://localhost:5173' }));
   app.use(express.json());
@@ -98,7 +102,7 @@ app.put('/api/people/:id/photo', requireAuth, allowRoles(UserRole.SUPER_ADMINIST
   } catch (error) { return next(error); }
 });
 
-app.get('/api/people/:id/photo', requireAuth, async (req: AuthenticatedRequest, res, next) => {
+app.get('/api/people/:id/photo', requireAuth, requireStaff, async (req: AuthenticatedRequest, res, next) => {
   try {
     const photo = await prisma.personPhoto.findFirst({ where: { personId: Number(req.params.id), person: { residenceId: req.user!.residenceId, active: true } } });
     if (!photo) return res.status(404).end();
@@ -142,7 +146,7 @@ app.put('/api/vehicles/:id/photo', requireAuth, allowRoles(UserRole.SUPER_ADMINI
   } catch (error) { return next(error); }
 });
 
-app.get('/api/vehicles/:id/photo', requireAuth, async (req: AuthenticatedRequest, res, next) => {
+app.get('/api/vehicles/:id/photo', requireAuth, requireStaff, async (req: AuthenticatedRequest, res, next) => {
   try {
     const photo = await prisma.vehiclePhoto.findFirst({ where: { vehicleId: Number(req.params.id), vehicle: { residenceId: req.user!.residenceId, active: true } } });
     if (!photo) return res.status(404).end();
@@ -219,6 +223,14 @@ app.post('/api/auth/login', async (req, res, next) => {
     if (!user || !user.active || !(await bcrypt.compare(input.password, user.passwordHash))) {
       return res.status(401).json({ message: 'Credenciales inválidas' });
     }
+    if (user.role === UserRole.RESIDENTE) {
+      if (!user.personId) return res.status(401).json({ message: 'Credenciales inválidas' });
+      const person = await prisma.person.findFirst({
+        where: { id: user.personId, residenceId: user.residenceId, type: PersonType.RESIDENTE, active: true },
+        select: { id: true },
+      });
+      if (!person) return res.status(401).json({ message: 'Credenciales inválidas' });
+    }
     const token = jwt.sign({ id: user.id, role: user.role, residenceId: user.residenceId }, jwtSecret, { expiresIn: '8h' });
     return res.json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role, residenceId: user.residenceId } });
   } catch (error) {
@@ -226,7 +238,63 @@ app.post('/api/auth/login', async (req, res, next) => {
   }
 });
 
-app.get('/api/dashboard', requireAuth, async (_req: AuthenticatedRequest, res, next) => {
+app.get('/api/resident/profile', requireAuth, requireResident, async (req: AuthenticatedRequest, res, next) => {
+  try {
+    if (!req.user?.personId) return res.status(403).json({ message: 'La cuenta no está asociada a un residente.' });
+    const person = await prisma.person.findFirst({
+      where: { id: req.user.personId, residenceId: req.user.residenceId, type: PersonType.RESIDENTE, active: true },
+      select: {
+        fullName: true,
+        buildingSectionType: true,
+        buildingSectionNumber: true,
+        apartmentNumber: true,
+        residence: { select: { name: true } },
+      },
+    });
+    if (!person) return res.status(403).json({ message: 'La cuenta no está asociada a un residente activo.' });
+    return res.json({
+      fullName: person.fullName,
+      buildingSectionType: person.buildingSectionType,
+      buildingSectionNumber: person.buildingSectionNumber,
+      apartmentNumber: person.apartmentNumber,
+      residenceName: person.residence.name,
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.get('/api/resident/deliveries', requireAuth, requireResident, async (req: AuthenticatedRequest, res, next) => {
+  try {
+    if (!req.user?.personId) return res.status(403).json({ message: 'La cuenta no está asociada a un residente.' });
+    const person = await prisma.person.findFirst({
+      where: { id: req.user.personId, residenceId: req.user.residenceId, type: PersonType.RESIDENTE, active: true },
+      select: { id: true },
+    });
+    if (!person) return res.status(403).json({ message: 'La cuenta no está asociada a un residente activo.' });
+    const deliveries = await prisma.delivery.findMany({
+      where: { personId: person.id, residenceId: req.user.residenceId },
+      orderBy: { receivedAt: 'desc' },
+      take: 200,
+      select: {
+        id: true,
+        type: true,
+        status: true,
+        courier: true,
+        description: true,
+        trackingCode: true,
+        receivedAt: true,
+        deliveredAt: true,
+        deliveredToName: true,
+      },
+    });
+    return res.json(deliveries);
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.get('/api/dashboard', requireAuth, requireStaff, async (_req: AuthenticatedRequest, res, next) => {
   try {
     const [latest, residents, visitors, today, pendingDeliveries] = await Promise.all([
       prisma.accessLog.findMany({ where: { residenceId: _req.user!.residenceId }, take: 10, orderBy: { occurredAt: 'desc' }, include: { person: { include: { photo: { select: { data: true, mimeType: true } } } }, vehicle: { include: { photo: { select: { data: true, mimeType: true } } } } } }),
@@ -256,7 +324,7 @@ app.get('/api/dashboard', requireAuth, async (_req: AuthenticatedRequest, res, n
   }
 });
 
-app.get('/api/people', requireAuth, async (_req: AuthenticatedRequest, res, next) => {
+app.get('/api/people', requireAuth, requireStaff, async (_req: AuthenticatedRequest, res, next) => {
   try {
     const people = await prisma.person.findMany({ where: { residenceId: _req.user!.residenceId, active: true }, orderBy: { fullName: 'asc' }, include: { documentType: true, photo: { select: { data: true, mimeType: true } } } });
     return res.json(people.map(({ photo, ...person }) => ({
@@ -268,7 +336,7 @@ app.get('/api/people', requireAuth, async (_req: AuthenticatedRequest, res, next
   }
 });
 
-app.get('/api/vehicles', requireAuth, async (_req: AuthenticatedRequest, res, next) => {
+app.get('/api/vehicles', requireAuth, requireStaff, async (_req: AuthenticatedRequest, res, next) => {
   try {
     const vehicles = await prisma.vehicle.findMany({
       where: { residenceId: _req.user!.residenceId, active: true },
@@ -306,7 +374,7 @@ const deliveryRelations = {
   deliveredBy: { select: { id: true, name: true } },
 };
 
-app.get('/api/deliveries', requireAuth, async (req: AuthenticatedRequest, res, next) => {
+app.get('/api/deliveries', requireAuth, requireStaff, async (req: AuthenticatedRequest, res, next) => {
   try {
     let status: DeliveryStatus | undefined;
     if (req.query.status !== undefined) {
@@ -327,7 +395,7 @@ app.get('/api/deliveries', requireAuth, async (req: AuthenticatedRequest, res, n
   }
 });
 
-app.post('/api/deliveries', requireAuth, async (req: AuthenticatedRequest, res, next) => {
+app.post('/api/deliveries', requireAuth, requireStaff, async (req: AuthenticatedRequest, res, next) => {
   try {
     const input = deliveryCreateSchema.parse(req.body);
     const person = await prisma.person.findFirst({
@@ -354,7 +422,7 @@ app.post('/api/deliveries', requireAuth, async (req: AuthenticatedRequest, res, 
   }
 });
 
-app.put('/api/deliveries/:id/status', requireAuth, async (req: AuthenticatedRequest, res, next) => {
+app.put('/api/deliveries/:id/status', requireAuth, requireStaff, async (req: AuthenticatedRequest, res, next) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: 'Identificador inválido.' });
@@ -401,7 +469,7 @@ app.put('/api/deliveries/:id/status', requireAuth, async (req: AuthenticatedRequ
   }
 });
 
-app.get('/api/document-types', requireAuth, async (_req, res, next) => {
+app.get('/api/document-types', requireAuth, requireStaff, async (_req, res, next) => {
   try {
     return res.json(await prisma.documentType.findMany({ where: { active: true }, orderBy: { code: 'asc' } }));
   } catch (error) {
@@ -409,7 +477,7 @@ app.get('/api/document-types', requireAuth, async (_req, res, next) => {
   }
 });
 
-app.get('/api/settings/irregular-access', requireAuth, async (_req: AuthenticatedRequest, res, next) => {
+app.get('/api/settings/irregular-access', requireAuth, requireStaff, async (_req: AuthenticatedRequest, res, next) => {
   try {
     const setting = await prisma.systemSetting.findUnique({ where: { residenceId_key: { residenceId: _req.user!.residenceId, key: 'irregular_access_mode' } } });
     return res.json({ mode: irregularAccessModeSchema.parse(setting?.value ?? 'BLOCK') });
@@ -429,7 +497,7 @@ app.put('/api/settings/irregular-access', requireAuth, allowRoles(UserRole.SUPER
   } catch (error) { return next(error); }
 });
 
-app.get('/api/settings/access-capture', requireAuth, async (req: AuthenticatedRequest, res, next) => {
+app.get('/api/settings/access-capture', requireAuth, requireStaff, async (req: AuthenticatedRequest, res, next) => {
   try {
     const setting = await prisma.systemSetting.findUnique({ where: { residenceId_key: { residenceId: req.user!.residenceId, key: 'access_capture_mode' } } });
     return res.json({ mode: accessCaptureModeSchema.parse(setting?.value ?? 'MANUAL') });
@@ -446,6 +514,45 @@ app.put('/api/settings/access-capture', requireAuth, allowRoles(UserRole.SUPER_A
     });
     return res.json({ mode });
   } catch (error) { return next(error); }
+});
+
+app.get('/api/settings/whatsapp', requireAuth, requireStaff, async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const setting = await prisma.systemSetting.findUnique({
+      where: { residenceId_key: { residenceId: req.user!.residenceId, key: 'whatsapp_phone' } },
+      select: { value: true },
+    });
+    return res.json({ phone: setting?.value ?? '' });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.put('/api/settings/whatsapp', requireAuth, allowRoles(UserRole.SUPER_ADMINISTRADOR, UserRole.ADMINISTRADOR), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const parsedInput = whatsappPhoneSchema.safeParse(req.body);
+    if (!parsedInput.success) {
+      return res.status(400).json({ message: 'El número debe tener máximo 30 caracteres.' });
+    }
+
+    const phone = parsedInput.data.phone ? normalizeWhatsAppPhone(parsedInput.data.phone) : '';
+    const where = { residenceId_key: { residenceId: req.user!.residenceId, key: 'whatsapp_phone' } };
+    if (phone) {
+      await prisma.systemSetting.upsert({
+        where,
+        update: { value: phone },
+        create: { ...where.residenceId_key, value: phone },
+      });
+    } else {
+      await prisma.systemSetting.deleteMany({ where: where.residenceId_key });
+    }
+    return res.json({ phone });
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('Ingresa un número móvil')) {
+      return res.status(400).json({ message: error.message });
+    }
+    return next(error);
+  }
 });
 
 app.post('/api/people', requireAuth, allowRoles(UserRole.SUPER_ADMINISTRADOR, UserRole.ADMINISTRADOR), async (req: AuthenticatedRequest, res, next) => {
@@ -470,7 +577,7 @@ app.post('/api/people', requireAuth, allowRoles(UserRole.SUPER_ADMINISTRADOR, Us
   }
 });
 
-app.post('/api/access/scan', requireAuth, async (req: AuthenticatedRequest, res, next) => {
+app.post('/api/access/scan', requireAuth, requireStaff, async (req: AuthenticatedRequest, res, next) => {
   try {
     const { code } = accessScanSchema.parse(req.body);
     const vehicle = await prisma.vehicle.findFirst({
@@ -498,7 +605,7 @@ app.post('/api/access/scan', requireAuth, async (req: AuthenticatedRequest, res,
   } catch (error) { return next(error); }
 });
 
-app.post('/api/access', requireAuth, async (req: AuthenticatedRequest, res, next) => {
+app.post('/api/access', requireAuth, requireStaff, async (req: AuthenticatedRequest, res, next) => {
   try {
     const input = accessSchema.parse(req.body);
     const result = await prisma.$transaction(async (transaction) => {
@@ -552,7 +659,7 @@ app.post('/api/access', requireAuth, async (req: AuthenticatedRequest, res, next
   }
 });
 
-app.get('/api/reports/access', requireAuth, async (req: AuthenticatedRequest, res, next) => {
+app.get('/api/reports/access', requireAuth, requireStaff, async (req: AuthenticatedRequest, res, next) => {
   try {
     const from = req.query.from ? new Date(String(req.query.from)) : new Date(new Date().setHours(0, 0, 0, 0));
     const to = req.query.to ? new Date(String(req.query.to)) : new Date();

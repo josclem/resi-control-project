@@ -45,6 +45,9 @@ export const personSchema = z.object({
 });
 export const irregularAccessModeSchema = z.enum(['BLOCK', 'SUPERVISOR']);
 export const accessCaptureModeSchema = z.enum(['MANUAL', 'BARCODE', 'QR', 'FINGERPRINT']);
+export const whatsappPhoneSchema = z.object({
+  phone: z.string().trim().max(30),
+});
 export const supervisorSchema = z.object({ email: z.string().email(), password: z.string().min(1) });
 export const residenceSchema = z.object({ name: z.string().trim().min(2).max(120) });
 export const vehicleSchema = z.object({
@@ -61,6 +64,15 @@ export function formatPhone(phone: string) {
   const national = digits.startsWith('57') && digits.length === 12 ? digits.slice(2) : digits;
   if (national.length !== 10) throw new Error('El teléfono debe tener 10 dígitos para Colombia.');
   return `(+57) ${national.slice(0, 3)} ${national.slice(3, 6)} ${national.slice(6)}`;
+}
+
+export function normalizeWhatsAppPhone(phone: string) {
+  const digits = phone.replace(/\D/g, '');
+  const national = digits.startsWith('57') && digits.length === 12 ? digits.slice(2) : digits;
+  if (!/^3\d{9}$/.test(national)) {
+    throw new Error('Ingresa un número móvil colombiano válido de 10 dígitos.');
+  }
+  return `+57${national}`;
 }
 
 export function normalizeDocumentNumber(documentNumber: string) {

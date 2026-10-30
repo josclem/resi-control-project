@@ -4,6 +4,7 @@ import {
   accessSchema,
   deliveryStatusSchema,
   formatPhone,
+  normalizeWhatsAppPhone,
   normalizeDocumentNumber,
   personSchema,
 } from '../../src/validation.js';
@@ -40,6 +41,12 @@ describe('validación de reglas de dominio', () => {
   it('normaliza teléfonos colombianos y rechaza longitudes inválidas', () => {
     expect(formatPhone('+57 300-123-4567')).toBe('(+57) 300 123 4567');
     expect(() => formatPhone('123')).toThrow('El teléfono debe tener 10 dígitos para Colombia.');
+  });
+
+  it('normaliza números móviles colombianos para WhatsApp', () => {
+    expect(normalizeWhatsAppPhone('300 123 4567')).toBe('+573001234567');
+    expect(normalizeWhatsAppPhone('+57 300-123-4567')).toBe('+573001234567');
+    expect(() => normalizeWhatsAppPhone('1234567890')).toThrow('Ingresa un número móvil colombiano válido de 10 dígitos.');
   });
 
   it('normaliza números de documento', () => {

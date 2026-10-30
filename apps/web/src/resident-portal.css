@@ -1,0 +1,88 @@
+.resident-portal {
+  max-width: 760px;
+}
+
+.resident-header {
+  align-items: center;
+  gap: 20px;
+}
+
+.resident-header p {
+  color: #74809a;
+  margin-top: 8px;
+}
+
+.resident-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.resident-panel {
+  background: #fff;
+  border: 1px solid #e6ebf2;
+  border-radius: 14px;
+  box-shadow: 0 5px 18px #1d31520b;
+  padding: 26px;
+}
+
+.resident-deliveries {
+  display: grid;
+  gap: 14px;
+}
+
+.resident-delivery {
+  border: 1px solid #e6ebf2;
+  border-radius: 12px;
+  padding: 18px;
+}
+
+.resident-delivery p {
+  color: #65718a;
+  margin-top: 8px;
+}
+
+.resident-delivery-heading {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.resident-status {
+  background: #eef3fb;
+  border-radius: 999px;
+  color: #315070;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 5px 10px;
+}
+
+.resident-status-pendiente {
+  background: #fff4dc;
+  color: #8a5a00;
+}
+
+.resident-status-entregada {
+  background: #effaf4;
+  color: #176b43;
+}
+
+.resident-status-devuelta {
+  background: #fff0ed;
+  color: #a53d2b;
+}
+
+@media (max-width: 760px) {
+  .resident-header {
+    display: flex;
+    align-items: flex-start;
+  }
+
+  .resident-actions {
+    width: 100%;
+  }
+
+  .resident-actions button {
+    flex: 1;
+  }
+}

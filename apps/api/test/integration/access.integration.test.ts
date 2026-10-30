@@ -19,14 +19,20 @@ const suffix = randomUUID();
 const guardEmail = `guard-${suffix}@example.test`;
 const supervisorEmail = `supervisor-${suffix}@example.test`;
 const supervisorPassword = 'Test-supervisor-123!';
+const residentEmail = `resident-${suffix}@example.test`;
+const residentPassword = 'Test-resident-123!';
 let residenceId: number;
 let otherResidenceId: number;
 let personId: number;
+let anotherPersonId: number;
 let otherPersonId: number;
 let guardId: number;
 let supervisorId: number;
 let otherGuardId: number;
+let residentId: number;
 let guardToken: string;
+let supervisorToken: string;
+let residentToken: string;
 
 describe('POST /api/access', () => {
   beforeAll(async () => {
@@ -92,7 +98,30 @@ describe('POST /api/access', () => {
         residenceId: otherResidenceId,
       },
     })).id;
+    anotherPersonId = (await prisma.person.create({
+      data: {
+        type: PersonType.RESIDENTE,
+        fullName: 'Otro residente de pruebas',
+        buildingSectionType: BuildingSectionType.TORRE,
+        buildingSectionNumber: '1',
+        apartmentNumber: '102',
+        residenceId,
+      },
+    })).id;
+    const resident = await prisma.user.create({
+      data: {
+        name: 'Residente de pruebas',
+        email: residentEmail,
+        passwordHash: await bcrypt.hash(residentPassword, 4),
+        role: UserRole.RESIDENTE,
+        residenceId,
+        personId,
+      },
+    });
+    residentId = resident.id;
     guardToken = jwt.sign({ id: guardId }, jwtSecret);
+    supervisorToken = jwt.sign({ id: supervisorId }, jwtSecret);
+    residentToken = jwt.sign({ id: residentId }, jwtSecret);
   });
 
   afterAll(async () => {
@@ -100,18 +129,18 @@ describe('POST /api/access', () => {
       await prisma.accessLog.deleteMany({ where: { residenceId } });
       await prisma.delivery.deleteMany({ where: { residenceId } });
       await prisma.vehicle.deleteMany({ where: { residenceId } });
+      await prisma.user.deleteMany({ where: { residenceId } });
       await prisma.person.deleteMany({ where: { residenceId } });
       await prisma.systemSetting.deleteMany({ where: { residenceId } });
-      await prisma.user.deleteMany({ where: { residenceId } });
       await prisma.residence.delete({ where: { id: residenceId } });
     }
     if (otherResidenceId) {
       await prisma.accessLog.deleteMany({ where: { residenceId: otherResidenceId } });
       await prisma.delivery.deleteMany({ where: { residenceId: otherResidenceId } });
       await prisma.vehicle.deleteMany({ where: { residenceId: otherResidenceId } });
+      await prisma.user.deleteMany({ where: { residenceId: otherResidenceId } });
       await prisma.person.deleteMany({ where: { residenceId: otherResidenceId } });
       await prisma.systemSetting.deleteMany({ where: { residenceId: otherResidenceId } });
-      await prisma.user.deleteMany({ where: { residenceId: otherResidenceId } });
       await prisma.residence.delete({ where: { id: otherResidenceId } });
     }
     await prisma.$disconnect();
@@ -307,5 +336,141 @@ describe('POST /api/access', () => {
       .set(authHeader, bearerToken())
 
     expect(response.status).toBe(400);
+  });
+
+  it('limita el perfil al residente asociado a la cuenta', async () => {
+    const response = await request(app)
+      .get('/api/resident/profile')
+      .set(authHeader, 'Bearer ' + residentToken);
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      fullName: 'Persona de pruebas',
+      buildingSectionType: BuildingSectionType.TORRE,
+      buildingSectionNumber: '1',
+      apartmentNumber: '101',
+      residenceName: 'Residencia de pruebas',
+    });
+    expect(response.body.documentNumber).toBeUndefined();
+    expect(response.body.phone).toBeUndefined();
+  });
+
+  it('permite iniciar sesión a un residente activo asociado a una persona activa', async () => {
+    const login = await request(app)
+      .post('/api/auth/login')
+      .send({ email: residentEmail, password: residentPassword });
+
+    expect(login.status).toBe(200);
+    expect(login.body.user.role).toBe(UserRole.RESIDENTE);
+
+    const profile = await request(app)
+      .get('/api/resident/profile')
+      .set(authHeader, 'Bearer ' + login.body.token);
+    expect(profile.status).toBe(200);
+    expect(profile.body.fullName).toBe('Persona de pruebas');
+  });
+
+  it('solo muestra las encomiendas de la persona asociada y omite notas internas', async () => {
+    const otherResidentDelivery = await prisma.delivery.create({
+      data: {
+        personId: anotherPersonId,
+        type: DeliveryType.COMIDA,
+        residenceId,
+        receivedById: guardId,
+      },
+    });
+    const ownDelivery = await prisma.delivery.create({
+      data: {
+        personId,
+        type: DeliveryType.PAQUETE,
+        notes: 'Nota interna de portería',
+        residenceId,
+        receivedById: guardId,
+      },
+    });
+    const expectedDeliveryIds = (await prisma.delivery.findMany({
+      where: { personId, residenceId },
+      select: { id: true },
+      orderBy: { receivedAt: 'desc' },
+    })).map(({ id }) => id);
+
+    const response = await request(app)
+      .get('/api/resident/deliveries')
+      .set(authHeader, 'Bearer ' + residentToken);
+
+    expect(response.status).toBe(200);
+    expect(response.body.map((delivery: { id: number }) => delivery.id)).toEqual(expectedDeliveryIds);
+    expect(response.body.some((delivery: { id: number }) => delivery.id === otherResidentDelivery.id)).toBe(false);
+    const returnedOwnDelivery = response.body.find((delivery: { id: number }) => delivery.id === ownDelivery.id);
+    expect(returnedOwnDelivery.notes).toBeUndefined();
+    expect(returnedOwnDelivery.receivedBy).toBeUndefined();
+  });
+
+  it('rechaza el inicio de sesión cuando el residente asociado está inactivo', async () => {
+    await prisma.person.update({ where: { id: personId }, data: { active: false } });
+    try {
+      const response = await request(app)
+        .post('/api/auth/login')
+        .send({ email: residentEmail, password: residentPassword });
+
+      expect(response.status).toBe(401);
+      expect(response.body.token).toBeUndefined();
+    } finally {
+      await prisma.person.update({ where: { id: personId }, data: { active: true } });
+    }
+  });
+
+  it('bloquea a residentes de las rutas operativas y de administración', async () => {
+    const accessCount = await prisma.accessLog.count({ where: { residenceId } });
+    const responses = await Promise.all([
+      request(app).get('/api/dashboard').set(authHeader, 'Bearer ' + residentToken),
+      request(app).get('/api/people').set(authHeader, 'Bearer ' + residentToken),
+      request(app).get('/api/deliveries').set(authHeader, 'Bearer ' + residentToken),
+      request(app).post('/api/access').set(authHeader, 'Bearer ' + residentToken).send({ personId, accessType: AccessType.ENTRADA }),
+    ]);
+
+    expect(responses.map(({ status }) => status)).toEqual([403, 403, 403, 403]);
+    expect(await prisma.accessLog.count({ where: { residenceId } })).toBe(accessCount);
+  });
+
+  it('permite a administración configurar el número de WhatsApp de la residencia', async () => {
+    const saved = await request(app)
+      .put('/api/settings/whatsapp')
+      .set(authHeader, 'Bearer ' + supervisorToken)
+      .send({ phone: '+57 300-123-4567' });
+
+    expect(saved.status).toBe(200);
+    expect(saved.body.phone).toBe('+573001234567');
+
+    const loaded = await request(app)
+      .get('/api/settings/whatsapp')
+      .set(authHeader, bearerToken());
+    expect(loaded.status).toBe(200);
+    expect(loaded.body.phone).toBe('+573001234567');
+  });
+
+  it('rechaza números inválidos y evita que vigilancia o residentes cambien el teléfono de WhatsApp', async () => {
+    const invalid = await request(app)
+      .put('/api/settings/whatsapp')
+      .set(authHeader, 'Bearer ' + supervisorToken)
+      .send({ phone: '1234567890' });
+    expect(invalid.status).toBe(400);
+
+    const guardUpdate = await request(app)
+      .put('/api/settings/whatsapp')
+      .set(authHeader, bearerToken())
+      .send({ phone: '3001234567' });
+    expect(guardUpdate.status).toBe(403);
+
+    const residentUpdate = await request(app)
+      .put('/api/settings/whatsapp')
+      .set(authHeader, 'Bearer ' + residentToken)
+      .send({ phone: '3001234567' });
+    expect(residentUpdate.status).toBe(403);
+
+    const saved = await prisma.systemSetting.findUnique({
+      where: { residenceId_key: { residenceId, key: 'whatsapp_phone' } },
+    });
+    expect(saved?.value).toBe('+573001234567');
   });
 });

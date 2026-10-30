@@ -5,6 +5,7 @@ import QRCode from 'qrcode';
 import { FormEvent, StrictMode, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import './access-search.css';
+import './resident-portal.css';
 import './styles.css';
 
 type BuildingSectionType = 'TORRE' | 'INTERIOR';
@@ -158,6 +159,78 @@ function validatePhoto(file: File) {
   return '';
 }
 
+type ResidentProfile = {
+  fullName: string;
+  buildingSectionType: BuildingSectionType | null;
+  buildingSectionNumber: string | null;
+  apartmentNumber: string;
+  residenceName: string;
+};
+
+type ResidentDelivery = Pick<Delivery, 'id' | 'type' | 'status' | 'courier' | 'description' | 'trackingCode' | 'receivedAt' | 'deliveredAt' | 'deliveredToName'>;
+
+function ResidentPortal() {
+  const [profile, setProfile] = useState<ResidentProfile | null>(null);
+  const [deliveries, setDeliveries] = useState<ResidentDelivery[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  async function loadPortal() {
+    setLoading(true);
+    setError('');
+    try {
+      const headers = { Authorization: `Bearer ${getToken()}` };
+      const [profileResponse, deliveriesResponse] = await Promise.all([
+        apiFetch(`${api}/api/resident/profile`, { headers }),
+        apiFetch(`${api}/api/resident/deliveries`, { headers }),
+      ]);
+      const profileData = await profileResponse.json().catch(() => null);
+      const deliveriesData = await deliveriesResponse.json().catch(() => null);
+      if (!profileResponse.ok) throw new Error(profileData?.message ?? 'No se pudo consultar el perfil.');
+      if (!deliveriesResponse.ok) throw new Error(deliveriesData?.message ?? 'No se pudieron consultar tus encomiendas.');
+      setProfile(profileData);
+      setDeliveries(deliveriesData);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'No se pudo cargar el portal.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void loadPortal();
+  }, []);
+
+  function logout() {
+    localStorage.removeItem('token');
+    localStorage.removeItem('userRole');
+    window.location.reload();
+  }
+
+  return <main className="resident-portal">
+    <header className="resident-header">
+      <div><span className="eyebrow">PORTAL RESIDENTE</span><h1>{profile?.residenceName ?? 'Resi Control'}</h1>
+        {profile && <p>{profile.fullName} · {formatPersonLocation(profile)}</p>}
+      </div>
+      <div className="resident-actions"><button className="secondary" type="button" onClick={() => void loadPortal()} disabled={loading}>Actualizar</button><button type="button" onClick={logout}>Cerrar sesión</button></div>
+    </header>
+    <section className="resident-panel">
+      <div className="panel-heading"><div><span className="eyebrow">MIS ENCOMIENDAS</span><h2>Historial de entregas</h2></div></div>
+      {error && <div className="notice">{error}</div>}
+      {loading ? <div className="empty">Cargando tus encomiendas…</div>
+        : deliveries.length ? <div className="resident-deliveries">{deliveries.map((delivery) => <article className="resident-delivery" key={delivery.id}>
+          <div className="resident-delivery-heading"><strong>{deliveryTypeLabels[delivery.type]}</strong><span className={`resident-status resident-status-${delivery.status.toLowerCase()}`}>{deliveryStatusLabels[delivery.status]}</span></div>
+          <p>Recibida el {new Date(delivery.receivedAt).toLocaleString('es-CO')}</p>
+          {delivery.courier && <p>Mensajería: {delivery.courier}</p>}
+          {delivery.description && <p>{delivery.description}</p>}
+          {delivery.trackingCode && <p>Guía: {delivery.trackingCode}</p>}
+          {delivery.deliveredAt && <p>Entregada el {new Date(delivery.deliveredAt).toLocaleString('es-CO')}{delivery.deliveredToName ? ` · Recibió: ${delivery.deliveredToName}` : ''}</p>}
+        </article>)}</div>
+          : <div className="empty">Todavía no tienes encomiendas registradas.</div>}
+    </section>
+  </main>;
+}
+
 function App() {
   const [authenticated, setAuthenticated] = useState(Boolean(localStorage.getItem('token')));
   const [userRole, setUserRole] = useState(localStorage.getItem('userRole') ?? '');
@@ -213,6 +286,7 @@ function App() {
   const [accessType, setAccessType] = useState<'ENTRADA' | 'SALIDA'>('ENTRADA');
   const [saving, setSaving] = useState(false);
   const [irregularMode, setIrregularMode] = useState<'BLOCK' | 'SUPERVISOR'>('BLOCK');
+  const [whatsappPhone, setWhatsappPhone] = useState('');
   const [showSettings, setShowSettings] = useState(false);
   const [supervisorEmail, setSupervisorEmail] = useState('');
   const [supervisorPassword, setSupervisorPassword] = useState('');
@@ -292,6 +366,10 @@ function App() {
     const captureResponse = await apiFetch(`${api}/api/settings/access-capture`, { headers: { Authorization: `Bearer ${token()}` } });
     if (!captureResponse.ok) throw new Error(`No se pudo consultar el modo de captura (HTTP ${captureResponse.status}).`);
     setAccessCaptureMode((await captureResponse.json()).mode);
+    const whatsappResponse = await apiFetch(`${api}/api/settings/whatsapp`, { headers: { Authorization: 'Bearer ' + token() } });
+    if (!whatsappResponse.ok) throw new Error(`No se pudo consultar el número de WhatsApp (HTTP ${whatsappResponse.status}).`);
+    const whatsappData = await whatsappResponse.json();
+    setWhatsappPhone(whatsappData.phone ? formatColombianPhone(whatsappData.phone) : '');
   }
 
   async function resolveScan(value: string) {
@@ -449,11 +527,11 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (!authenticated) return;
+    if (!authenticated || userRole === 'RESIDENTE') return;
     Promise.all([loadDashboard(), loadPeople(), loadDocumentTypes(), loadVehicles(), loadDeliveries(), loadResidence()])
       .catch((reason: Error) => setError(reason.message));
     loadSettings().catch((reason: Error) => setError(reason.message));
-  }, [authenticated]);
+  }, [authenticated, userRole]);
 
   useEffect(() => () => {
     scannerControlsRef.current?.stop();
@@ -933,6 +1011,24 @@ function App() {
     finally { setSaving(false); }
   }
 
+  async function saveWhatsAppPhone(event: FormEvent) {
+    event.preventDefault();
+    setSaving(true); setError(''); setNotice('');
+    try {
+      const response = await apiFetch(`${api}/api/settings/whatsapp`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token() },
+        body: JSON.stringify({ phone: whatsappPhone }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.message ?? 'No se pudo guardar el número de WhatsApp.');
+      setWhatsappPhone(data.phone ? formatColombianPhone(data.phone) : '');
+      setNotice(data.phone ? 'Número de WhatsApp guardado correctamente.' : 'Número de WhatsApp eliminado de la configuración.');
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'No se pudo guardar el número de WhatsApp.');
+    } finally { setSaving(false); }
+  }
+
   async function saveResidence(event: FormEvent) {
     event.preventDefault();
     setSaving(true); setError(''); setNotice('');
@@ -954,11 +1050,13 @@ function App() {
   }
 
   if (!authenticated) return <main className="login-page"><form className="login-card" onSubmit={login}>
-    <span className="eyebrow">RESI CONTROL</span><h1>Iniciar sesión</h1><p>Ingresa para administrar el acceso residencial.</p>
+    <span className="eyebrow">RESI CONTROL</span><h1>Iniciar sesión</h1><p>Ingresa a tu portal o al sistema de administración residencial.</p>
     <label>Correo<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label>
     <label>Contraseña<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
     {loginError && <div className="notice">{loginError}</div>}<button type="submit">Ingresar</button>
   </form></main>;
+
+  if (userRole === 'RESIDENTE') return <ResidentPortal />;
 
   return <main>
     <header><div className="brand"><div className="residence-logo">{residenceLogoUrl ? <img src={residenceLogoUrl} alt={`Logo de ${residence?.name ?? 'la residencia'}`} /> : <span>RC</span>}</div><div><span className="eyebrow">RESI CONTROL</span><h1>{residence?.name ?? 'Control de acceso'}</h1><p>Supervisión del conjunto residencial en tiempo real.</p></div></div><div className="actions"><button className={activeView === 'movements' ? 'active-nav' : ''} onClick={() => { setActiveView('movements'); setShowAccessForm(false); }}>Movimientos</button><button className={activeView === 'people' ? 'active-nav' : ''} onClick={() => { setActiveView('people'); setShowAccessForm(false); }}>Personas</button><button className={activeView === 'vehicles' ? 'active-nav' : ''} onClick={() => { setActiveView('vehicles'); setShowAccessForm(false); }}>Vehículos</button><button className={activeView === 'deliveries' ? 'active-nav' : ''} onClick={() => { setActiveView('deliveries'); setShowAccessForm(false); }}>Encomiendas{totals.pendingDeliveries ? ` · ${totals.pendingDeliveries}` : ''}</button>{(userRole === 'ADMINISTRADOR' || userRole === 'SUPER_ADMINISTRADOR') && <button className={activeView === 'settings' ? 'active-nav' : ''} onClick={() => { setActiveView('settings'); setShowSettings(true); }}>Configuración</button>}</div></header>
@@ -995,6 +1093,13 @@ function App() {
       <small className="form-full">Formatos permitidos: JPG, PNG o WebP. Tamaño máximo: 2 MB.</small>
       <button disabled={saving} type="submit">{saving ? 'Guardando...' : 'Guardar residencia'}</button>
     </form></section>}
+    {activeView === 'settings' && showSettings && (userRole === 'ADMINISTRADOR' || userRole === 'SUPER_ADMINISTRADOR') && <section className="form-panel"><div className="panel-heading"><div><span className="eyebrow">NOTIFICACIONES</span><h2>Número de WhatsApp</h2></div></div>
+      <form className="form-grid" onSubmit={saveWhatsAppPhone}>
+        <label>Número celular dedicado<input type="tel" inputMode="tel" autoComplete="tel" maxLength={30} placeholder="(+57) 300 123 4567" value={whatsappPhone} onChange={(event) => setWhatsappPhone(event.target.value)} /></label>
+        <small className="form-full">Ingresa el número móvil colombiano que se usará para WhatsApp Business. Se guardará en formato internacional (+57). Configurar el número aquí no conecta ni envía mensajes: eso requiere completar la configuración de Meta.</small>
+        <button disabled={saving} type="submit">{saving ? 'Guardando...' : 'Guardar número de WhatsApp'}</button>
+      </form>
+    </section>}
     {activeView === 'people' && showPersonForm && <div className="modal-backdrop" onClick={() => { setShowPersonForm(false); setEditingPersonId(null); }}><section className="form-panel modal-panel" onClick={(event) => event.stopPropagation()}><div className="panel-heading"><div><span className="eyebrow">{editingPersonId ? 'EDITAR REGISTRO' : 'NUEVO REGISTRO'}</span><h2>{editingPersonId ? 'Editar persona' : 'Registrar persona'}</h2></div><button type="button" className="secondary" onClick={() => { setShowPersonForm(false); setEditingPersonId(null); }}>Cerrar</button></div><form className="form-grid" onSubmit={createPerson}>
       <label>Tipo<select value={personType} onChange={(event) => setPersonType(event.target.value as Person['type'])}><option value="RESIDENTE">Residente</option><option value="VISITANTE">Visitante</option></select></label>
       <label>Nombre completo<input required value={fullName} onChange={(event) => setFullName(event.target.value)} /></label>

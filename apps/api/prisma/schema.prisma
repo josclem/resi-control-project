@@ -11,6 +11,7 @@ enum UserRole {
   SUPER_ADMINISTRADOR
   ADMINISTRADOR
   VIGILANTE
+  RESIDENTE
 }
 
 enum PersonType {
@@ -75,6 +76,8 @@ model User {
   createdAt    DateTime @default(now())
   residenceId  Int      @default(1)
   residence    Residence @relation(fields: [residenceId], references: [id])
+  personId     Int?     @unique
+  person       Person?  @relation(fields: [personId], references: [id])
   accessLogs   AccessLog[]
   authorizedAccessLogs AccessLog[] @relation("AccessOverride")
   receivedDeliveries Delivery[] @relation("DeliveryReceived")
@@ -98,6 +101,7 @@ model Person {
   updatedAt        DateTime   @updatedAt
   residenceId      Int        @default(1)
   residence       Residence  @relation(fields: [residenceId], references: [id])
+  user             User?
   accessLogs       AccessLog[]
   vehicles         Vehicle[]
   documentType     DocumentType? @relation(fields: [documentTypeId], references: [id])

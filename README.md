@@ -6,7 +6,7 @@ MVP para gestionar el acceso de residentes y visitantes de un conjunto residenci
 
 - **API:** Node.js, Express, TypeScript, Prisma y PostgreSQL.
 - **Frontend:** React, Vite y TypeScript.
-- **Autenticación:** JWT con perfiles `SUPER_ADMINISTRADOR`, `ADMINISTRADOR` y `VIGILANTE`.
+- **Autenticación:** JWT con perfiles `SUPER_ADMINISTRADOR`, `ADMINISTRADOR`, `VIGILANTE` y `RESIDENTE`.
 - **Biometría:** preparada como integración posterior; el sistema guarda el identificador de la plantilla, no datos biométricos crudos.
 
 ## Inicio rápido
@@ -60,6 +60,10 @@ No trabajes directamente sobre `main` ni `production`. Mantén las ramas actuali
 ## Modelo inicial
 
 Se separan residentes, visitantes y usuarios del sistema. Un residente o visitante puede tener múltiples registros de acceso. Cada registro conserva tipo de acceso, fecha/hora, nombre y apartamento. Las encomiendas se asocian a una persona y conservan tipo, estado, remitente, guía, fecha de recepción y datos de entrega. Los nombres de perfiles son datos de configuración del dominio y pueden cambiarse más adelante sin afectar el flujo.
+
+Las cuentas con perfil `RESIDENTE` se asocian individualmente a una persona residente activa. El portal permite consultar únicamente el perfil y las encomiendas de esa persona; no expone listas generales, movimientos de acceso ni notas internas de portería. La creación y activación de cuentas queda pendiente de la invitación segura y la verificación por WhatsApp; no se deben habilitar cuentas residentes manualmente antes de completar ese flujo.
+
+El número celular dedicado para WhatsApp Business se configura en **Configuración → Número de WhatsApp** y se guarda por residencia en formato internacional. Este dato solo identifica el número previsto: no conecta con Meta ni envía mensajes. Para habilitar envíos se necesita completar la configuración de Meta Business Platform por separado; sus tokens y credenciales no deben guardarse en este campo.
 
 La conexión con lectores de huella y puertas se implementará mediante un adaptador de dispositivo cuando se conozcan fabricante, protocolo, SDK y modo de instalación.
 
