@@ -9,6 +9,8 @@
   "scripts": {
     "dev": "concurrently \"npm run dev --workspace @resi-control/api\" \"npm run dev --workspace @resi-control/web\"",
     "build": "npm run build --workspace @resi-control/api && npm run build --workspace @resi-control/web",
+    "test": "npm run test --workspace @resi-control/api",
+    "test:integration": "npm run test:integration --workspace @resi-control/api",
     "db:generate": "npm run db:generate --workspace @resi-control/api",
     "db:push": "npm run db:push --workspace @resi-control/api",
     "db:seed": "npm run db:seed --workspace @resi-control/api"

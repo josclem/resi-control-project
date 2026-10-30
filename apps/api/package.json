@@ -4,8 +4,12 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/server.ts",
+    "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",
+    "test": "npm run test:typecheck && npm run test:unit",
+    "test:typecheck": "tsc -p tsconfig.test.json",
+    "test:unit": "vitest run test/unit",
+    "test:integration": "vitest run test/integration",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
     "db:seed": "prisma db seed"
@@ -27,9 +31,12 @@
     "@types/jsonwebtoken": "^9.0.9",
     "@types/multer": "^2.3.0",
     "@types/node": "^22.10.5",
+    "@types/supertest": "^7.2.1",
     "prisma": "^6.2.1",
+    "supertest": "^7.3.1",
     "tsx": "^4.19.2",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "vitest": "^5.0.5"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
