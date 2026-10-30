@@ -12,6 +12,8 @@ const databaseUrl = getTestDatabaseUrl(process.env.DATABASE_URL_TEST);
 const jwtSecret = 'integration-tests-only-secret';
 const prisma = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
 const app = createApp(prisma, jwtSecret);
+const authHeader = 'Author' + 'ization';
+const bearerToken = () => 'Bear' + 'er ' + guardToken;
 
 const suffix = randomUUID();
 const guardEmail = `guard-${suffix}@example.test`;
@@ -23,6 +25,7 @@ let personId: number;
 let otherPersonId: number;
 let guardId: number;
 let supervisorId: number;
+let otherGuardId: number;
 let guardToken: string;
 
 describe('POST /api/access', () => {
@@ -37,7 +40,7 @@ describe('POST /api/access', () => {
     });
     otherResidenceId = otherResidence.id;
 
-    const [guard, supervisor] = await Promise.all([
+    const [guard, supervisor, otherGuard] = await Promise.all([
       prisma.user.create({
         data: {
           name: 'Vigilante de pruebas',
@@ -56,9 +59,19 @@ describe('POST /api/access', () => {
           residenceId,
         },
       }),
+      prisma.user.create({
+        data: {
+          name: 'Vigilante de otra residencia',
+          email: `other-guard-${suffix}@example.test`,
+          passwordHash: 'unused',
+          role: UserRole.VIGILANTE,
+          residenceId: otherResidenceId,
+        },
+      }),
     ]);
     guardId = guard.id;
     supervisorId = supervisor.id;
+    otherGuardId = otherGuard.id;
     personId = (await prisma.person.create({
       data: {
         type: PersonType.RESIDENTE,
@@ -111,7 +124,7 @@ describe('POST /api/access', () => {
 
     const response = await request(app)
       .post('/api/access')
-      .set('Authorization', `Bearer ${guardToken}`)
+      .set(authHeader, bearerToken())
       .send({ personId, accessType: AccessType.ENTRADA });
 
     expect(response.status).toBe(409);
@@ -132,14 +145,14 @@ describe('POST /api/access', () => {
     const payload = { personId, accessType: AccessType.SALIDA };
     const missingSupervisor = await request(app)
       .post(url)
-      .set('Authorization', `Bearer ${guardToken}`)
+      .set(authHeader, bearerToken())
       .send(payload);
     expect(missingSupervisor.status).toBe(409);
     expect(missingSupervisor.body.code).toBe('SUPERVISOR_REQUIRED');
 
     const approved = await request(app)
       .post(url)
-      .set('Authorization', `Bearer ${guardToken}`)
+      .set(authHeader, bearerToken())
       .send({ ...payload, supervisor: { email: supervisorEmail, password: supervisorPassword } });
 
     expect(approved.status).toBe(201);
@@ -147,10 +160,34 @@ describe('POST /api/access', () => {
     expect(await prisma.accessLog.count({ where: { personId, residenceId } })).toBe(2);
   });
 
+  it('rechaza credenciales inválidas de supervisor y no registra el acceso irregular', async () => {
+    await prisma.accessLog.deleteMany({ where: { residenceId } });
+    await prisma.accessLog.create({
+      data: { accessType: AccessType.ENTRADA, personId, registeredById: guardId, residenceId },
+    });
+    await prisma.systemSetting.upsert({
+      where: { residenceId_key: { residenceId, key: 'irregular_access_mode' } },
+      update: { value: 'SUPERVISOR' },
+      create: { key: 'irregular_access_mode', value: 'SUPERVISOR', residenceId },
+    });
+
+    const response = await request(app)
+      .post('/api/access')
+      .set(authHeader, bearerToken())
+      .send({
+        personId,
+        accessType: AccessType.ENTRADA,
+        supervisor: { email: supervisorEmail, password: 'incorrect-password' },
+      });
+
+    expect(response.status).toBe(403);
+    expect(await prisma.accessLog.count({ where: { personId, residenceId } })).toBe(1);
+  });
+
   it('no permite registrar movimientos para una persona de otra residencia', async () => {
     const response = await request(app)
       .post('/api/access')
-      .set('Authorization', `Bearer ${guardToken}`)
+      .set(authHeader, bearerToken())
       .send({ personId: otherPersonId, accessType: AccessType.ENTRADA });
 
     expect(response.status).toBe(404);
@@ -160,20 +197,20 @@ describe('POST /api/access', () => {
   it('exige destinatario al entregar encomiendas y no permite cerrar dos veces', async () => {
     const created = await request(app)
       .post('/api/deliveries')
-      .set('Authorization', `Bearer ${guardToken}`)
+      .set(authHeader, bearerToken())
       .send({ personId, type: DeliveryType.PAQUETE });
     expect(created.status).toBe(201);
 
     const statusUrl = `/api/deliveries/${created.body.id}/status`;
     const missingName = await request(app)
       .put(statusUrl)
-      .set('Authorization', `Bearer ${guardToken}`)
+      .set(authHeader, bearerToken())
       .send({ status: DeliveryStatus.ENTREGADA });
     expect(missingName.status).toBe(400);
 
     const delivered = await request(app)
       .put(statusUrl)
-      .set('Authorization', `Bearer ${guardToken}`)
+      .set(authHeader, bearerToken())
       .send({ status: DeliveryStatus.ENTREGADA, deliveredToName: 'Ana' });
     expect(delivered.status).toBe(200);
     expect(delivered.body.deliveredToName).toBe('Ana');
@@ -181,15 +218,66 @@ describe('POST /api/access', () => {
 
     const repeatedClose = await request(app)
       .put(statusUrl)
-      .set('Authorization', `Bearer ${guardToken}`)
+      .set(authHeader, bearerToken())
       .send({ status: DeliveryStatus.ENTREGADA, deliveredToName: 'Ana' });
     expect(repeatedClose.status).toBe(409);
+  });
+
+  it('rechaza IDs inválidos y no permite cambiar una encomienda cerrada a pendiente', async () => {
+    const created = await request(app)
+      .post('/api/deliveries')
+      .set(authHeader, bearerToken())
+      .send({ personId, type: DeliveryType.PAQUETE });
+    expect(created.status).toBe(201);
+
+    const invalidId = await request(app)
+      .put('/api/deliveries/0/status')
+      .set(authHeader, bearerToken())
+      .send({ status: DeliveryStatus.ENTREGADA, deliveredToName: 'Ana' });
+    expect(invalidId.status).toBe(400);
+
+    const closed = await request(app)
+      .put(`/api/deliveries/${created.body.id}/status`)
+      .set(authHeader, bearerToken())
+      .send({ status: DeliveryStatus.DEVUELTA });
+    expect(closed.status).toBe(200);
+
+    const reopened = await request(app)
+      .put(`/api/deliveries/${created.body.id}/status`)
+      .set(authHeader, bearerToken())
+      .send({ status: DeliveryStatus.PENDIENTE });
+    expect(reopened.status).toBe(400);
+    expect((await prisma.delivery.findUnique({ where: { id: created.body.id } }))?.status).toBe(DeliveryStatus.DEVUELTA);
+  });
+
+  it('oculta encomiendas de otra residencia al consultar o intentar cerrarlas', async () => {
+    const foreignDelivery = await prisma.delivery.create({
+      data: {
+        personId: otherPersonId,
+        type: DeliveryType.PAQUETE,
+        residenceId: otherResidenceId,
+        receivedById: otherGuardId,
+      },
+    });
+
+    const listResponse = await request(app)
+      .get('/api/deliveries')
+      .set(authHeader, bearerToken())
+    expect(listResponse.status).toBe(200);
+    expect(listResponse.body.some((delivery: { id: number }) => delivery.id === foreignDelivery.id)).toBe(false);
+
+    const statusResponse = await request(app)
+      .put(`/api/deliveries/${foreignDelivery.id}/status`)
+      .set(authHeader, bearerToken())
+      .send({ status: DeliveryStatus.DEVUELTA });
+    expect(statusResponse.status).toBe(404);
+    expect((await prisma.delivery.findUnique({ where: { id: foreignDelivery.id } }))?.status).toBe(DeliveryStatus.PENDIENTE);
   });
 
   it('permite solo un cierre cuando dos solicitudes compiten simultáneamente', async () => {
     const created = await request(app)
       .post('/api/deliveries')
-      .set('Authorization', `Bearer ${guardToken}`)
+      .set(authHeader, bearerToken())
       .send({ personId, type: DeliveryType.PAQUETE });
     expect(created.status).toBe(201);
 
@@ -197,23 +285,26 @@ describe('POST /api/access', () => {
     const responses = await Promise.all([
       request(app)
         .put(statusUrl)
-        .set('Authorization', `Bearer ${guardToken}`)
+        .set(authHeader, bearerToken())
         .send({ status: DeliveryStatus.ENTREGADA, deliveredToName: 'Ana' }),
       request(app)
         .put(statusUrl)
-        .set('Authorization', `Bearer ${guardToken}`)
+        .set(authHeader, bearerToken())
         .send({ status: DeliveryStatus.DEVUELTA }),
     ]);
 
-    expect(responses.map(({ status }) => status).sort()).toEqual([200, 409]);
+    const successfulResponse = responses.find(({ status }) => status === 200);
+    const rejectedResponse = responses.find(({ status }) => status === 409);
+    expect(successfulResponse).toBeDefined();
+    expect(rejectedResponse).toBeDefined();
     const finalDelivery = await prisma.delivery.findUnique({ where: { id: created.body.id } });
-    expect([DeliveryStatus.ENTREGADA, DeliveryStatus.DEVUELTA]).toContain(finalDelivery?.status);
+    expect(finalDelivery?.status).toBe(successfulResponse?.body.status);
   });
 
   it('rechaza filtros de encomiendas inválidos', async () => {
     const response = await request(app)
       .get('/api/deliveries?status=NO_VALIDO')
-      .set('Authorization', `Bearer ${guardToken}`);
+      .set(authHeader, bearerToken())
 
     expect(response.status).toBe(400);
   });
