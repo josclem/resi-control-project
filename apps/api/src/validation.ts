@@ -1,7 +1,7 @@
 import { AccessType, BuildingSectionType, DeliveryStatus, DeliveryType, PersonType, VehicleType } from '@prisma/client';
 import { z } from 'zod';
 
-export const loginSchema = z.object({ email: z.string().email(), password: z.string().min(1) });
+export const loginSchema = z.object({ email: z.string().trim().email().transform((value) => value.toLowerCase()), password: z.string().min(1) });
 export const accessSchema = z.object({
   personId: z.number().int().positive(),
   vehicleId: z.number().int().positive().optional(),
@@ -47,6 +47,20 @@ export const irregularAccessModeSchema = z.enum(['BLOCK', 'SUPERVISOR']);
 export const accessCaptureModeSchema = z.enum(['MANUAL', 'BARCODE', 'QR', 'FINGERPRINT']);
 export const whatsappPhoneSchema = z.object({
   phone: z.string().trim().max(30),
+});
+export const residentInvitationSchema = z.object({
+  personId: z.number().int().positive(),
+  whatsappOptInConfirmed: z.boolean(),
+});
+export const residentActivationSchema = z.object({
+  code: z.string().regex(/^\d{6}$/),
+  phone: z.string().trim().min(1).max(30),
+  email: z.string().trim().email().max(254).transform((value) => value.toLowerCase()),
+  password: z.string().min(12).max(128),
+  consentToWhatsapp: z.boolean(),
+});
+export const residentNotificationConsentSchema = z.object({
+  consented: z.boolean(),
 });
 export const supervisorSchema = z.object({ email: z.string().email(), password: z.string().min(1) });
 export const residenceSchema = z.object({ name: z.string().trim().min(2).max(120) });

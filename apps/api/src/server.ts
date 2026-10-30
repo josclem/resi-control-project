@@ -1,9 +1,10 @@
 import express, { NextFunction, Request, Response } from 'express';
+import { createHmac, randomInt, timingSafeEqual } from 'node:crypto';
 import multer from 'multer';
 import cors from 'cors';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
-import { AccessType, PersonType, PrismaClient, UserRole, DeliveryStatus } from '@prisma/client';
+import { AccessType, PersonType, PrismaClient, UserRole, DeliveryStatus, ResidentNotificationConsentSource, ResidentNotificationConsentStatus } from '@prisma/client';
 import { z } from 'zod';
 import {
   accessSchema,
@@ -22,9 +23,19 @@ import {
   formatPhone,
   normalizeDocumentNumber,
   normalizeWhatsAppPhone,
+  residentActivationSchema,
+  residentInvitationSchema,
+  residentNotificationConsentSchema,
 } from './validation.js';
+import { assertWhatsAppConfigured, createWhatsAppInvitationSender, ResidentInvitationSender, WhatsAppDeliveryError, WhatsAppNotConfiguredError } from './whatsapp.js';
 
 type AuthenticatedRequest = Request & { user?: { id: number; role: UserRole; residenceId: number; personId: number | null } };
+type CreateAppOptions = {
+  residentPortalUrl?: string;
+  sendResidentInvitation?: ResidentInvitationSender;
+};
+const residentOtpTtlMs = 10 * 60 * 1000;
+const residentOtpMaxAttempts = 5;
 
 function createRequireAuth(prisma: PrismaClient, jwtSecret: string) {
   return async function requireAuth(req: AuthenticatedRequest, res: Response, next: NextFunction) {
@@ -43,10 +54,12 @@ function createRequireAuth(prisma: PrismaClient, jwtSecret: string) {
   };
 }
 
-export function createApp(prisma: PrismaClient, jwtSecret: string) {
+export function createApp(prisma: PrismaClient, jwtSecret: string, options: CreateAppOptions = {}) {
   if (!jwtSecret) throw new Error('JWT_SECRET es obligatorio');
 
   const app = express();
+  const residentPortalUrl = options.residentPortalUrl ?? process.env.RESIDENT_PORTAL_URL;
+  const sendResidentInvitation = options.sendResidentInvitation ?? createWhatsAppInvitationSender();
   const requireAuth = createRequireAuth(prisma, jwtSecret);
   const requireStaff = allowRoles(UserRole.SUPER_ADMINISTRADOR, UserRole.ADMINISTRADOR, UserRole.VIGILANTE);
   const requireResident = allowRoles(UserRole.RESIDENTE);
@@ -219,7 +232,7 @@ app.put('/api/residence', requireAuth, allowRoles(UserRole.SUPER_ADMINISTRADOR, 
 app.post('/api/auth/login', async (req, res, next) => {
   try {
     const input = loginSchema.parse(req.body);
-    const user = await prisma.user.findUnique({ where: { email: input.email } });
+    const user = await prisma.user.findFirst({ where: { email: { equals: input.email, mode: 'insensitive' } } });
     if (!user || !user.active || !(await bcrypt.compare(input.password, user.passwordHash))) {
       return res.status(401).json({ message: 'Credenciales inválidas' });
     }
@@ -238,6 +251,240 @@ app.post('/api/auth/login', async (req, res, next) => {
   }
 });
 
+app.post('/api/resident-invitations', requireAuth, allowRoles(UserRole.SUPER_ADMINISTRADOR, UserRole.ADMINISTRADOR), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const { personId, whatsappOptInConfirmed } = residentInvitationSchema.parse(req.body);
+    if (!whatsappOptInConfirmed) {
+      return res.status(400).json({ message: 'Confirma que el residente autorizó previamente recibir esta invitación por WhatsApp.' });
+    }
+    if (!residentPortalUrl) return res.status(503).json({ message: 'Falta configurar la URL pública del portal residente.' });
+    if (!options.sendResidentInvitation) {
+      try {
+        assertWhatsAppConfigured();
+      } catch (error) {
+        if (error instanceof WhatsAppNotConfiguredError) return res.status(503).json({ message: error.message });
+        throw error;
+      }
+    }
+
+    let portalUrl: URL;
+    try {
+      portalUrl = new URL(residentPortalUrl);
+    } catch {
+      return res.status(503).json({ message: 'La URL del portal residente no es válida.' });
+    }
+    const localDevelopmentUrl = portalUrl.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(portalUrl.hostname);
+    if (portalUrl.protocol !== 'https:' && !localDevelopmentUrl) {
+      return res.status(503).json({ message: 'La URL del portal debe usar HTTPS.' });
+    }
+
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + residentOtpTtlMs);
+    const code = randomInt(0, 1_000_000).toString().padStart(6, '0');
+
+    const result = await prisma.$transaction(async (transaction) => {
+      const lockedPerson = await transaction.$queryRaw<{ id: number }[]>`
+        SELECT "id" FROM "Person"
+        WHERE "id" = ${personId} AND "residenceId" = ${req.user!.residenceId}
+        FOR UPDATE
+      `;
+      if (!lockedPerson.length) return { status: 404 as const };
+
+      const person = await transaction.person.findFirst({
+        where: { id: personId, residenceId: req.user!.residenceId, type: PersonType.RESIDENTE, active: true },
+        include: { user: { select: { id: true } } },
+      });
+      if (!person) return { status: 404 as const };
+      if (person.user) return { status: 409 as const, reason: 'account' as const };
+      if (!person.phone) return { status: 400 as const, reason: 'phone' as const };
+
+      const whatsappSetting = await transaction.systemSetting.findUnique({
+        where: { residenceId_key: { residenceId: req.user!.residenceId, key: 'whatsapp_phone' } },
+        select: { value: true },
+      });
+      if (!whatsappSetting?.value) return { status: 409 as const, reason: 'sender' as const };
+
+      const recentInvitations = await transaction.residentInvitation.count({
+        where: { personId, createdAt: { gte: new Date(now.getTime() - 60 * 60 * 1000) } },
+      });
+      if (recentInvitations >= 3) return { status: 429 as const };
+
+      let recipientPhone: string;
+      try {
+        recipientPhone = normalizeWhatsAppPhone(person.phone);
+      } catch {
+        return { status: 400 as const, reason: 'phone' as const };
+      }
+      const tokenHash = createHmac('sha256', jwtSecret).update(`${recipientPhone}:${code}`).digest('hex');
+
+      await transaction.residentInvitation.updateMany({
+        where: { personId, consumedAt: null, revokedAt: null },
+        data: { revokedAt: now },
+      });
+      await transaction.residentInvitation.create({
+        data: {
+          tokenHash,
+          recipientPhone,
+          personId,
+          residenceId: req.user!.residenceId,
+          createdById: req.user!.id,
+          whatsappOptInAt: now,
+          whatsappOptInById: req.user!.id,
+          expiresAt,
+        },
+      });
+      await sendResidentInvitation({
+        phone: recipientPhone,
+        code,
+      });
+      return { status: 201 as const };
+    }, { maxWait: 2_000, timeout: 15_000 });
+
+    if (result.status === 404) return res.status(404).json({ message: 'Residente no encontrado o inactivo.' });
+    if (result.status === 400) return res.status(400).json({ message: 'El residente no tiene un teléfono móvil válido registrado.' });
+    if (result.status === 409 && result.reason === 'account') return res.status(409).json({ message: 'Este residente ya tiene una cuenta activa.' });
+    if (result.status === 409 && result.reason === 'sender') return res.status(409).json({ message: 'Configura el número de WhatsApp de la residencia antes de invitar.' });
+    if (result.status === 429) return res.status(429).json({ message: 'Se alcanzó el límite de invitaciones para este residente. Intenta más tarde.' });
+    return res.status(201).json({ message: 'Código de activación enviado por WhatsApp.', expiresAt, portalUrl: portalUrl.toString() });
+  } catch (error) {
+    if (error instanceof WhatsAppNotConfiguredError) return res.status(503).json({ message: error.message });
+    if (error instanceof WhatsAppDeliveryError) {
+      return res.status(502).json({ message: 'WhatsApp Business no aceptó el envío. No se creó la invitación; verifica la plantilla y vuelve a intentar.' });
+    }
+    return next(error);
+  }
+});
+
+app.delete('/api/resident-invitations/:personId', requireAuth, allowRoles(UserRole.SUPER_ADMINISTRADOR, UserRole.ADMINISTRADOR), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const personId = Number(req.params.personId);
+    if (!Number.isInteger(personId) || personId <= 0) return res.status(400).json({ message: 'Identificador de residente inválido.' });
+    const now = new Date();
+    const revoked = await prisma.residentInvitation.updateMany({
+      where: {
+        personId,
+        residenceId: req.user!.residenceId,
+        consumedAt: null,
+        revokedAt: null,
+        expiresAt: { gt: now },
+      },
+      data: { revokedAt: now },
+    });
+    if (!revoked.count) return res.status(404).json({ message: 'No hay una invitación pendiente para revocar.' });
+    return res.json({ revoked: true });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.post('/api/resident/activate', async (req, res, next) => {
+  try {
+    const input = residentActivationSchema.parse(req.body);
+    let recipientPhone: string;
+    try {
+      recipientPhone = normalizeWhatsAppPhone(input.phone);
+    } catch {
+      return res.status(400).json({ message: 'El código no es válido, venció o alcanzó el límite de intentos.' });
+    }
+    const tokenHash = createHmac('sha256', jwtSecret).update(`${recipientPhone}:${input.code}`).digest('hex');
+    const passwordHash = await bcrypt.hash(input.password, 12);
+    const now = new Date();
+
+    const activation = await prisma.$transaction(async (transaction) => {
+      const initialInvitation = await transaction.residentInvitation.findUnique({
+        where: { tokenHash },
+        select: { id: true, personId: true, residenceId: true, recipientPhone: true },
+      });
+      if (!initialInvitation || initialInvitation.recipientPhone !== recipientPhone) {
+        await transaction.residentInvitation.updateMany({
+          where: {
+            recipientPhone,
+            consumedAt: null,
+            revokedAt: null,
+            expiresAt: { gt: now },
+            otpAttempts: { lt: residentOtpMaxAttempts },
+          },
+          data: { otpAttempts: { increment: 1 } },
+        });
+        return { status: 'invalid' as const };
+      }
+
+      const lockedPerson = await transaction.$queryRaw<{ id: number }[]>`
+        SELECT "id" FROM "Person"
+        WHERE "id" = ${initialInvitation.personId} AND "residenceId" = ${initialInvitation.residenceId}
+        FOR UPDATE
+      `;
+      if (!lockedPerson.length) return { status: 'invalid' as const };
+
+      const invitation = await transaction.residentInvitation.findUnique({
+        where: { tokenHash },
+        include: { person: { include: { user: { select: { id: true } } } } },
+      });
+      if (
+        !invitation ||
+        invitation.consumedAt ||
+        invitation.revokedAt ||
+        invitation.expiresAt <= now ||
+        !invitation.person.active ||
+        invitation.person.type !== PersonType.RESIDENTE ||
+        invitation.person.residenceId !== invitation.residenceId ||
+        invitation.person.user
+      ) return { status: 'invalid' as const };
+
+      if (invitation.otpAttempts >= residentOtpMaxAttempts) return { status: 'invalid' as const };
+      const expectedHash = Buffer.from(invitation.tokenHash, 'hex');
+      const suppliedHash = Buffer.from(tokenHash, 'hex');
+      if (expectedHash.length !== suppliedHash.length || !timingSafeEqual(expectedHash, suppliedHash)) return { status: 'invalid' as const };
+
+      const emailAlreadyUsed = await transaction.user.findFirst({
+        where: { email: { equals: input.email, mode: 'insensitive' } },
+        select: { id: true },
+      });
+      if (emailAlreadyUsed) return { status: 'email-conflict' as const };
+
+      const claimed = await transaction.residentInvitation.updateMany({
+        where: { id: invitation.id, consumedAt: null, revokedAt: null, expiresAt: { gt: now } },
+        data: { consumedAt: now },
+      });
+      if (!claimed.count) return { status: 'invalid' as const };
+
+      const createdUser = await transaction.user.create({
+        data: {
+          name: invitation.person.fullName,
+          email: input.email,
+          passwordHash,
+          role: UserRole.RESIDENTE,
+          residenceId: invitation.residenceId,
+          personId: invitation.personId,
+          whatsappVerifiedAt: now,
+        },
+      });
+      await transaction.residentNotificationConsent.create({
+        data: {
+          userId: createdUser.id,
+          source: ResidentNotificationConsentSource.INVITATION,
+          status: input.consentToWhatsapp ? ResidentNotificationConsentStatus.GRANTED : ResidentNotificationConsentStatus.DECLINED,
+        },
+      });
+      return { status: 'created' as const, user: createdUser };
+    });
+
+    if (activation.status === 'invalid') return res.status(400).json({ message: 'La invitación no es válida, venció o ya fue utilizada.' });
+    if (activation.status === 'email-conflict') return res.status(409).json({ message: 'Este correo ya está asociado a una cuenta.' });
+    const { user } = activation;
+    const authToken = jwt.sign({ id: user.id, role: user.role, residenceId: user.residenceId }, jwtSecret, { expiresIn: '8h' });
+    return res.status(201).json({
+      token: authToken,
+      user: { id: user.id, name: user.name, email: user.email, role: user.role, residenceId: user.residenceId },
+    });
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'P2002') {
+      return res.status(409).json({ message: 'No se pudo activar la cuenta. Verifica los datos o solicita una nueva invitación.' });
+    }
+    return next(error);
+  }
+});
+
 app.get('/api/resident/profile', requireAuth, requireResident, async (req: AuthenticatedRequest, res, next) => {
   try {
     if (!req.user?.personId) return res.status(403).json({ message: 'La cuenta no está asociada a un residente.' });
@@ -252,13 +499,58 @@ app.get('/api/resident/profile', requireAuth, requireResident, async (req: Authe
       },
     });
     if (!person) return res.status(403).json({ message: 'La cuenta no está asociada a un residente activo.' });
+    const latestConsent = await prisma.residentNotificationConsent.findFirst({
+      where: { userId: req.user!.id },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      select: { status: true },
+    });
     return res.json({
       fullName: person.fullName,
       buildingSectionType: person.buildingSectionType,
       buildingSectionNumber: person.buildingSectionNumber,
       apartmentNumber: person.apartmentNumber,
       residenceName: person.residence.name,
+      whatsappNotificationsEnabled: latestConsent?.status === ResidentNotificationConsentStatus.GRANTED,
     });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.put('/api/resident/notifications/consent', requireAuth, requireResident, async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const { consented } = residentNotificationConsentSchema.parse(req.body);
+    const updated = await prisma.$transaction(async (transaction) => {
+      const lockedUser = await transaction.$queryRaw<{ id: number }[]>`
+        SELECT "id" FROM "User"
+        WHERE "id" = ${req.user!.id} AND "residenceId" = ${req.user!.residenceId} AND "role" = 'RESIDENTE' AND "active" = true
+        FOR UPDATE
+      `;
+      if (!lockedUser.length || !req.user?.personId) return false;
+      const person = await transaction.person.findFirst({
+        where: { id: req.user.personId, residenceId: req.user.residenceId, type: PersonType.RESIDENTE, active: true },
+        select: { id: true },
+      });
+      if (!person) return false;
+      const latestConsent = await transaction.residentNotificationConsent.findFirst({
+        where: { userId: req.user!.id },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        select: { status: true },
+      });
+      const currentlyConsented = latestConsent?.status === ResidentNotificationConsentStatus.GRANTED;
+      if (consented !== currentlyConsented) {
+        await transaction.residentNotificationConsent.create({
+          data: {
+            userId: req.user!.id,
+            source: ResidentNotificationConsentSource.PORTAL,
+            status: consented ? ResidentNotificationConsentStatus.GRANTED : ResidentNotificationConsentStatus.REVOKED,
+          },
+        });
+      }
+      return true;
+    });
+    if (!updated) return res.status(403).json({ message: 'La cuenta no está asociada a un residente activo.' });
+    return res.json({ whatsappNotificationsEnabled: consented });
   } catch (error) {
     return next(error);
   }
@@ -326,9 +618,20 @@ app.get('/api/dashboard', requireAuth, requireStaff, async (_req: AuthenticatedR
 
 app.get('/api/people', requireAuth, requireStaff, async (_req: AuthenticatedRequest, res, next) => {
   try {
-    const people = await prisma.person.findMany({ where: { residenceId: _req.user!.residenceId, active: true }, orderBy: { fullName: 'asc' }, include: { documentType: true, photo: { select: { data: true, mimeType: true } } } });
-    return res.json(people.map(({ photo, ...person }) => ({
+    const people = await prisma.person.findMany({
+      where: { residenceId: _req.user!.residenceId, active: true },
+      orderBy: { fullName: 'asc' },
+      include: {
+        documentType: true,
+        photo: { select: { data: true, mimeType: true } },
+        user: { select: { id: true } },
+        residentInvitations: { where: { consumedAt: null, revokedAt: null, expiresAt: { gt: new Date() } }, select: { id: true }, take: 1 },
+      },
+    });
+    return res.json(people.map(({ photo, user, residentInvitations, ...person }) => ({
       ...person,
+      hasPortalAccount: Boolean(user),
+      hasPendingInvitation: residentInvitations.length > 0,
       photoUrl: photo ? `data:${photo.mimeType};base64,${Buffer.from(photo.data).toString('base64')}` : null,
     })));
   } catch (error) {

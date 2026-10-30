@@ -11,7 +11,7 @@ import './styles.css';
 type BuildingSectionType = 'TORRE' | 'INTERIOR';
 type PersonLocation = { buildingSectionType: BuildingSectionType | null; buildingSectionNumber: string | null; apartmentNumber: string };
 type Log = { id: number; accessType: 'ENTRADA' | 'SALIDA'; occurredAt: string; person: { id: number; fullName: string; type: string; documentNumber?: string | null; phone?: string | null; photoUrl?: string | null } & PersonLocation; vehicle?: { id: number; plate: string; type: string; brand?: string | null; model?: string | null; color?: string | null; photoUrl?: string | null } | null };
-type Person = { id: number; accessCode: string; type: 'RESIDENTE' | 'VISITANTE'; fullName: string; documentNumber?: string | null; phone?: string | null; documentType?: { code: string; name: string } | null; photoUrl?: string | null } & PersonLocation;
+type Person = { id: number; accessCode: string; type: 'RESIDENTE' | 'VISITANTE'; fullName: string; documentNumber?: string | null; phone?: string | null; hasPortalAccount?: boolean; hasPendingInvitation?: boolean; documentType?: { code: string; name: string } | null; photoUrl?: string | null } & PersonLocation;
 type DocumentType = { id: number; code: string; name: string };
 type Vehicle = { id: number; accessCode: string; personId: number; plate: string; type: 'AUTOMOVIL' | 'MOTOCICLETA' | 'BICICLETA' | 'OTRO'; brand?: string | null; model?: string | null; color?: string | null; photoUrl?: string | null; person: { fullName: string; type: string } & PersonLocation };
 type Residence = { id: number; name: string; code: string; hasLogo: boolean; logo?: string | null; userRole?: string };
@@ -56,7 +56,7 @@ function formatPersonLocation(person: PersonLocation) {
 function normalizePersonSearch(value: string) {
   return value.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
-const api = 'http://localhost:4000';
+const api = import.meta.env.VITE_API_URL || 'http://localhost:4000';
 const getToken = () => localStorage.getItem('token') ?? '';
 const sessionExpiredEvent = 'resi-control:session-expired';
 const nativeFetch = window.fetch.bind(window);
@@ -165,6 +165,7 @@ type ResidentProfile = {
   buildingSectionNumber: string | null;
   apartmentNumber: string;
   residenceName: string;
+  whatsappNotificationsEnabled: boolean;
 };
 
 type ResidentDelivery = Pick<Delivery, 'id' | 'type' | 'status' | 'courier' | 'description' | 'trackingCode' | 'receivedAt' | 'deliveredAt' | 'deliveredToName'>;
@@ -174,6 +175,7 @@ function ResidentPortal() {
   const [deliveries, setDeliveries] = useState<ResidentDelivery[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [savingConsent, setSavingConsent] = useState(false);
 
   async function loadPortal() {
     setLoading(true);
@@ -207,6 +209,25 @@ function ResidentPortal() {
     window.location.reload();
   }
 
+  async function updateConsent(consented: boolean) {
+    setSavingConsent(true);
+    setError('');
+    try {
+      const response = await apiFetch(`${api}/api/resident/notifications/consent`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + localStorage.getItem('token') },
+        body: JSON.stringify({ consented }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.message ?? 'No se pudo actualizar tu preferencia.');
+      setProfile((current) => current ? { ...current, whatsappNotificationsEnabled: data.whatsappNotificationsEnabled } : current);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'No se pudo actualizar tu preferencia.');
+    } finally {
+      setSavingConsent(false);
+    }
+  }
+
   return <main className="resident-portal">
     <header className="resident-header">
       <div><span className="eyebrow">PORTAL RESIDENTE</span><h1>{profile?.residenceName ?? 'Resi Control'}</h1>
@@ -214,6 +235,15 @@ function ResidentPortal() {
       </div>
       <div className="resident-actions"><button className="secondary" type="button" onClick={() => void loadPortal()} disabled={loading}>Actualizar</button><button type="button" onClick={logout}>Cerrar sesión</button></div>
     </header>
+    <section className="resident-panel resident-consent-panel">
+      <div><span className="eyebrow">NOTIFICACIONES</span><h2>Avisos por WhatsApp</h2>
+        <p>Tu decisión se puede cambiar en cualquier momento. Activar esta opción no envía mensajes ahora; el envío requiere que la residencia configure WhatsApp Business.</p>
+        <strong>{profile?.whatsappNotificationsEnabled ? 'Has aceptado recibir avisos.' : 'No has aceptado recibir avisos.'}</strong>
+      </div>
+      <button type="button" className={profile?.whatsappNotificationsEnabled ? 'secondary' : ''} disabled={!profile || savingConsent} onClick={() => void updateConsent(!profile?.whatsappNotificationsEnabled)}>
+        {savingConsent ? 'Guardando...' : profile?.whatsappNotificationsEnabled ? 'Retirar consentimiento' : 'Aceptar avisos'}
+      </button>
+    </section>
     <section className="resident-panel">
       <div className="panel-heading"><div><span className="eyebrow">MIS ENCOMIENDAS</span><h2>Historial de entregas</h2></div></div>
       {error && <div className="notice">{error}</div>}
@@ -229,6 +259,51 @@ function ResidentPortal() {
           : <div className="empty">Todavía no tienes encomiendas registradas.</div>}
     </section>
   </main>;
+}
+
+function ResidentActivation() {
+  const [code, setCode] = useState('');
+  const [phone, setPhone] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [consentToWhatsapp, setConsentToWhatsapp] = useState(false);
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  async function activate(event: FormEvent) {
+    event.preventDefault();
+    setSaving(true);
+    setError('');
+    try {
+      const response = await nativeFetch(`${api}/api/resident/activate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code, phone, email, password, consentToWhatsapp }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.message ?? 'No se pudo activar la cuenta.');
+      localStorage.setItem('token', data.token);
+      localStorage.setItem('userRole', data.user.role);
+      window.history.replaceState(null, '', window.location.pathname);
+      window.location.reload();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'No se pudo activar la cuenta.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return <main className="login-page"><form className="login-card" onSubmit={activate}>
+    <span className="eyebrow">PORTAL RESIDENTE</span><h1>Activa tu cuenta</h1>
+    <p>Ingresa el código de seis dígitos que recibiste por WhatsApp y crea tus credenciales.</p>
+    <label>Código de activación<input required inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, '').slice(0, 6))} /></label>
+    <label>Celular que recibió el código<input required type="tel" autoComplete="tel" maxLength={30} value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="+57 300 123 4567" /></label>
+    <label>Correo<input required type="email" autoComplete="email" maxLength={254} value={email} onChange={(event) => setEmail(event.target.value)} /></label>
+    <label>Contraseña<input required type="password" autoComplete="new-password" minLength={12} maxLength={128} value={password} onChange={(event) => setPassword(event.target.value)} /><small>Usa al menos 12 caracteres.</small></label>
+    <label className="resident-consent-choice"><input type="checkbox" checked={consentToWhatsapp} onChange={(event) => setConsentToWhatsapp(event.target.checked)} />Acepto recibir futuros avisos de encomiendas por WhatsApp. Puedo retirar este consentimiento desde mi portal.</label>
+    <p>Este consentimiento es independiente de la autorización previa para enviarte este código. Si no marcas la casilla, la cuenta se activará sin aceptar avisos futuros.</p>
+    {error && <div className="notice">{error}</div>}<button disabled={saving} type="submit">{saving ? 'Activando...' : 'Crear cuenta e ingresar'}</button>
+  </form></main>;
 }
 
 function App() {
@@ -322,6 +397,8 @@ function App() {
   const [selectedVehiclePhoto, setSelectedVehiclePhoto] = useState('');
   const [selectedPerson, setSelectedPerson] = useState<Person | null>(null);
   const [selectedVehicle, setSelectedVehicle] = useState<Vehicle | null>(null);
+  const [invitingPersonId, setInvitingPersonId] = useState<number | null>(null);
+  const [confirmedWhatsappOptInPersonId, setConfirmedWhatsappOptInPersonId] = useState<number | null>(null);
 
   const token = () => localStorage.getItem('token') ?? '';
 
@@ -337,6 +414,50 @@ function App() {
     const response = await apiFetch(`${api}/api/people`, { headers: { Authorization: `Bearer ${getToken()}` } });
     if (!response.ok) throw new Error('No se pudieron consultar las personas.');
     setPeople(await response.json());
+  }
+
+  async function inviteResident(person: Person) {
+    setInvitingPersonId(person.id);
+    setError('');
+    setNotice('');
+    try {
+      const response = await apiFetch(`${api}/api/resident-invitations`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token() },
+        body: JSON.stringify({ personId: person.id, whatsappOptInConfirmed: confirmedWhatsappOptInPersonId === person.id }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.message ?? 'No se pudo enviar la invitación.');
+      setSelectedPerson({ ...person, hasPendingInvitation: true });
+      setConfirmedWhatsappOptInPersonId(null);
+      setPeople((current) => current.map((item) => item.id === person.id ? { ...item, hasPendingInvitation: true } : item));
+      setNotice(`${data.message} Vence ${new Date(data.expiresAt).toLocaleString('es-CO')}. Indica al residente que abra ${data.portalUrl} para activar su cuenta.`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'No se pudo enviar la invitación.');
+    } finally {
+      setInvitingPersonId(null);
+    }
+  }
+
+  async function revokeResidentInvitation(person: Person) {
+    setInvitingPersonId(person.id);
+    setError('');
+    setNotice('');
+    try {
+      const response = await apiFetch(`${api}/api/resident-invitations/${person.id}`, {
+        method: 'DELETE',
+        headers: { Authorization: 'Bearer ' + token() },
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.message ?? 'No se pudo revocar la invitación.');
+      setSelectedPerson({ ...person, hasPendingInvitation: false });
+      setPeople((current) => current.map((item) => item.id === person.id ? { ...item, hasPendingInvitation: false } : item));
+      setNotice('Invitación revocada.');
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'No se pudo revocar la invitación.');
+    } finally {
+      setInvitingPersonId(null);
+    }
   }
 
   async function loadDocumentTypes() {
@@ -1049,11 +1170,14 @@ function App() {
     finally { setSaving(false); }
   }
 
+  const isResidentActivation = new URLSearchParams(window.location.search).get('activar') === '1';
+  if (isResidentActivation) return <ResidentActivation />;
   if (!authenticated) return <main className="login-page"><form className="login-card" onSubmit={login}>
     <span className="eyebrow">RESI CONTROL</span><h1>Iniciar sesión</h1><p>Ingresa a tu portal o al sistema de administración residencial.</p>
     <label>Correo<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label>
     <label>Contraseña<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
     {loginError && <div className="notice">{loginError}</div>}<button type="submit">Ingresar</button>
+    <p><a href="?activar=1">Tengo un código de activación</a></p>
   </form></main>;
 
   if (userRole === 'RESIDENTE') return <ResidentPortal />;
@@ -1160,7 +1284,7 @@ function App() {
       <div className="detail-grid"><div className="detail-card"><h3>Persona</h3>{selectedPersonPhoto ? <img className="detail-photo" src={selectedPersonPhoto} alt={`Foto de ${selectedLog.person.fullName}`} /> : <div className="detail-photo-placeholder">Sin foto</div>}<p><strong>{selectedLog.person.fullName}</strong></p><p>{selectedLog.person.type === 'VISITANTE' ? 'Visitante' : 'Residente'} · {formatPersonLocation(selectedLog.person)}</p><p>Documento: {selectedLog.person.documentNumber || 'No registrado'}</p><p>Teléfono: {selectedLog.person.phone || 'No registrado'}</p></div>
         <div className="detail-card"><h3>Vehículo</h3>{selectedLog.vehicle ? <><div className="detail-photo-wrap">{selectedVehiclePhoto ? <img className="detail-photo" src={selectedVehiclePhoto} alt={`Foto del vehículo ${selectedLog.vehicle.plate}`} /> : <div className="detail-photo-placeholder">Sin foto</div>}</div><p><strong>{selectedLog.vehicle.plate}</strong></p><p>Tipo: {selectedLog.vehicle.type === 'AUTOMOVIL' ? 'Automóvil' : selectedLog.vehicle.type === 'MOTOCICLETA' ? 'Motocicleta' : selectedLog.vehicle.type === 'BICICLETA' ? 'Bicicleta' : 'Otro'}</p><p>Marca: {selectedLog.vehicle.brand || 'No registrada'}</p><p>Modelo: {selectedLog.vehicle.model || 'No registrado'}</p><p>Color: {selectedLog.vehicle.color || 'No registrado'}</p></> : <div className="empty">Este movimiento no está asociado a un vehículo.</div>}</div></div>
     </section></div>}
-    {selectedPerson && <div className="detail-backdrop" onClick={() => setSelectedPerson(null)}><section className="movement-detail" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}><div className="panel-heading"><div><span className="eyebrow">DETALLE DE PERSONA</span><h2>{selectedPerson.fullName}</h2></div><button className="secondary" onClick={() => setSelectedPerson(null)}>Cerrar</button></div><div className="detail-grid"><div className="detail-card">{selectedPerson.photoUrl ? <img className="detail-photo" src={selectedPerson.photoUrl} alt={`Foto de ${selectedPerson.fullName}`} /> : <div className="detail-photo-placeholder">Sin foto</div>}<p><strong>{selectedPerson.type === 'RESIDENTE' ? 'Residente' : 'Visitante'}</strong></p><p>Sector: {formatBuildingSection(selectedPerson)}</p><p>Apartamento: {selectedPerson.apartmentNumber}</p><p>Documento: {selectedPerson.documentType?.code || 'No registrado'} {selectedPerson.documentNumber || ''}</p><p>Teléfono: {selectedPerson.phone || 'No registrado'}</p></div><div className="detail-card"><h3>Acciones</h3><button onClick={() => { setSelectedPerson(null); editPerson(selectedPerson); }}>Editar persona</button><label className="file-button detail-file-button">Subir o reemplazar foto<input type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" onChange={async (event) => { const file = event.target.files?.[0] ?? null; await uploadPhoto('people', selectedPerson.id, file); if (file) setSelectedPerson({ ...selectedPerson, photoUrl: URL.createObjectURL(file) }); }} /></label>{selectedPerson.photoUrl && <button className="small-button danger-button" onClick={async () => { await deletePersonPhoto(selectedPerson.id); setSelectedPerson({ ...selectedPerson, photoUrl: null }); }}>Eliminar foto</button>}<AccessCodeCard code={selectedPerson.accessCode} label="Código de la persona" /></div></div></section></div>}
+    {selectedPerson && <div className="detail-backdrop" onClick={() => { setSelectedPerson(null); setConfirmedWhatsappOptInPersonId(null); }}><section className="movement-detail" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}><div className="panel-heading"><div><span className="eyebrow">DETALLE DE PERSONA</span><h2>{selectedPerson.fullName}</h2></div><button className="secondary" onClick={() => { setSelectedPerson(null); setConfirmedWhatsappOptInPersonId(null); }}>Cerrar</button></div><div className="detail-grid"><div className="detail-card">{selectedPerson.photoUrl ? <img className="detail-photo" src={selectedPerson.photoUrl} alt={`Foto de ${selectedPerson.fullName}`} /> : <div className="detail-photo-placeholder">Sin foto</div>}<p><strong>{selectedPerson.type === 'RESIDENTE' ? 'Residente' : 'Visitante'}</strong></p><p>Sector: {formatBuildingSection(selectedPerson)}</p><p>Apartamento: {selectedPerson.apartmentNumber}</p><p>Documento: {selectedPerson.documentType?.code || 'No registrado'} {selectedPerson.documentNumber || ''}</p><p>Teléfono: {selectedPerson.phone || 'No registrado'}</p></div><div className="detail-card"><h3>Acciones</h3><button onClick={() => { setSelectedPerson(null); editPerson(selectedPerson); }}>Editar persona</button>{selectedPerson.type === 'RESIDENTE' && <><p>{selectedPerson.hasPortalAccount ? 'Cuenta residente activa.' : 'Sin cuenta residente.'}</p>{!selectedPerson.hasPortalAccount && <><label className="resident-consent-choice"><input type="checkbox" checked={confirmedWhatsappOptInPersonId === selectedPerson.id} onChange={(event) => setConfirmedWhatsappOptInPersonId(event.target.checked ? selectedPerson.id : null)} />Confirmo que esta persona solicitó o autorizó previamente recibir la invitación por WhatsApp.</label><button disabled={Boolean(invitingPersonId) || !selectedPerson.phone || confirmedWhatsappOptInPersonId !== selectedPerson.id} onClick={() => void inviteResident(selectedPerson)}>{invitingPersonId === selectedPerson.id ? 'Enviando...' : selectedPerson.hasPendingInvitation ? 'Reenviar código por WhatsApp' : 'Enviar código por WhatsApp'}</button></>}{selectedPerson.hasPendingInvitation && <button className="secondary" disabled={Boolean(invitingPersonId)} onClick={() => void revokeResidentInvitation(selectedPerson)}>Revocar invitación</button>}{!selectedPerson.phone && <small>Registra un teléfono móvil para invitar.</small>}</>}<label className="file-button detail-file-button">Subir o reemplazar foto<input type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" onChange={async (event) => { const file = event.target.files?.[0] ?? null; await uploadPhoto('people', selectedPerson.id, file); if (file) setSelectedPerson({ ...selectedPerson, photoUrl: URL.createObjectURL(file) }); }} /></label>{selectedPerson.photoUrl && <button className="small-button danger-button" onClick={async () => { await deletePersonPhoto(selectedPerson.id); setSelectedPerson({ ...selectedPerson, photoUrl: null }); }}>Eliminar foto</button>}<AccessCodeCard code={selectedPerson.accessCode} label="Código de la persona" /></div></div></section></div>}
     {selectedVehicle && <div className="detail-backdrop" onClick={() => setSelectedVehicle(null)}><section className="movement-detail" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}><div className="panel-heading"><div><span className="eyebrow">DETALLE DE VEHÍCULO</span><h2>{selectedVehicle.plate}</h2></div><button className="secondary" onClick={() => setSelectedVehicle(null)}>Cerrar</button></div><div className="detail-grid"><div className="detail-card">{selectedVehicle.photoUrl ? <img className="detail-photo" src={selectedVehicle.photoUrl} alt={`Foto del vehículo ${selectedVehicle.plate}`} /> : <div className="detail-photo-placeholder">Sin foto</div>}<p><strong>{selectedVehicle.type === 'AUTOMOVIL' ? 'Automóvil' : selectedVehicle.type === 'MOTOCICLETA' ? 'Motocicleta' : selectedVehicle.type === 'BICICLETA' ? 'Bicicleta' : 'Otro'}</strong></p><p>Marca: {selectedVehicle.brand || 'No registrada'}</p><p>Modelo: {selectedVehicle.model || 'No registrado'}</p><p>Color: {selectedVehicle.color || 'No registrado'}</p><p>Propietario: {selectedVehicle.person.fullName}</p><p>Ubicación: {formatPersonLocation(selectedVehicle.person)}</p></div><div className="detail-card"><h3>Acciones</h3><button onClick={() => { setSelectedVehicle(null); editVehicle(selectedVehicle); }}>Editar vehículo</button><label className="file-button detail-file-button">Subir o reemplazar foto<input type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" onChange={async (event) => { const file = event.target.files?.[0] ?? null; await uploadPhoto('vehicles', selectedVehicle.id, file); if (file) setSelectedVehicle({ ...selectedVehicle, photoUrl: URL.createObjectURL(file) }); }} /></label>{selectedVehicle.photoUrl && <button className="small-button danger-button" onClick={async () => { await deleteVehiclePhoto(selectedVehicle.id); setSelectedVehicle({ ...selectedVehicle, photoUrl: null }); }}>Eliminar foto</button>}<AccessCodeCard code={selectedVehicle.accessCode} label="Código del vehículo" /></div></div></section></div>}
   </main>;
 }

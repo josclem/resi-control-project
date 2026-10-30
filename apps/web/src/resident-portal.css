@@ -25,6 +25,36 @@
   padding: 26px;
 }
 
+.resident-consent-panel {
+  align-items: center;
+  display: flex;
+  gap: 20px;
+  justify-content: space-between;
+  margin-bottom: 18px;
+}
+
+.resident-consent-panel h2 {
+  margin-top: 6px;
+}
+
+.resident-consent-panel p {
+  color: #65718a;
+  margin: 8px 0;
+  max-width: 520px;
+}
+
+.resident-consent-choice {
+  align-items: flex-start;
+  display: flex;
+  gap: 10px;
+}
+
+.resident-consent-choice input {
+  flex: 0 0 auto;
+  margin-top: 4px;
+  width: auto;
+}
+
 .resident-deliveries {
   display: grid;
   gap: 14px;
@@ -84,5 +114,10 @@
 
   .resident-actions button {
     flex: 1;
+  }
+
+  .resident-consent-panel {
+    align-items: stretch;
+    flex-direction: column;
   }
 }
