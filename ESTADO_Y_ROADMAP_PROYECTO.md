@@ -16,7 +16,7 @@ La prioridad inmediata sigue siendo estabilidad, trazabilidad y cierre de los fl
 ### Implementado
 
 - API web y frontend React/TypeScript, PostgreSQL y Prisma.
-- Autenticación y roles de superadministrador, administrador, vigilante y residente; aislamiento de datos por residencia.
+- Autenticación, separación de privilegios y aislamiento de datos por residencia; administración configurable de usuarios y roles en desarrollo dentro de la Fase 1.
 - Registro de residentes y visitantes, datos de ubicación, vehículos asociados y gestión de fotografías.
 - Registro de entradas y salidas, búsqueda manual, códigos QR y de barras, reglas para movimientos repetidos y autorización de supervisor.
 - Registro, seguimiento y cierre de encomiendas en portería, con historial de recepción y entrega.
@@ -24,14 +24,13 @@ La prioridad inmediata sigue siendo estabilidad, trazabilidad y cierre de los fl
 - Solicitud de activación del portal por WhatsApp con verificación del webhook. Esto no equivale a notificaciones de visitas o encomiendas.
 - Dashboard básico y endpoint de reportes de accesos. La cobertura de reportes operativos sigue siendo parcial.
 - Pruebas unitarias y de integración y validaciones de CI para los flujos críticos existentes.
-- Autenticación actual con roles fijos en el código; aún no existe administración de usuarios o permisos desde la interfaz.
 
 ### Parcial o pendiente
 
 - **Visitas:** portería registra accesos y hay códigos QR de identificación para personas y vehículos; no existe pre-registro de invitados con QR temporal, vigencia y validación al llegar.
 - **Notificaciones:** hay invitaciones de portal por WhatsApp y consentimiento registrado; faltan avisos automáticos de visitas y encomiendas, trazabilidad de entrega y manejo de errores.
 - **Encomiendas:** flujo básico de recepción/entrega implementado; faltan aviso automático al residente, evidencia de entrega configurable y reportes completos.
-- **Residentes y usuarios:** el portal residente es limitado; falta administración de usuarios/roles desde interfaz. Los roles actuales son fijos; aún no hay roles configurables con permisos granulares. También falta modelar, si el negocio lo requiere, relaciones de propietario, arrendatario y familiares autorizados.
+- **Residentes y usuarios:** la primera implementación de administración de usuarios y roles está en curso en la rama `feature/user-role-management`. Incluye SuperAdministrador global, selector de residencia, permisos granulares y desactivación conservando el historial. Quedan pendientes la validación funcional de interfaz y los incrementos de producto siguientes. También falta modelar, si el negocio lo requiere, relaciones de propietario, arrendatario y familiares autorizados.
 - **Parqueaderos:** se registra el vehículo del residente, pero no hay asignación/control de cupos, permisos de parqueadero ni operación de parqueaderos de visitantes.
 - **Reportes:** existe un endpoint de accesos, pero falta una experiencia integral de reportes con filtros y cobertura de encomiendas, PQRS e incidencias.
 - **Aplicación móvil:** existe una aplicación web; no hay una app nativa. Primero se debe validar si el portal web móvil cubre las necesidades.
@@ -76,23 +75,23 @@ Las fases representan dependencias y orden de producto, no fechas comprometidas.
 
 **Validación técnica (2026-11-03):** 15 pruebas unitarias, 23 pruebas de integración y el build de API/web pasaron. El build web reportó una advertencia no bloqueante por el tamaño del bundle.
 
-**Criterio de salida cumplido:** flujos críticos reproducibles y cubiertos por pruebas; reglas de negocio y permisos documentados; build y suites de pruebas en verde. La administración configurable de usuarios/roles queda explícitamente como funcionalidad de Fase 1; el código aún usa roles fijos.
+**Criterio de salida cumplido:** flujos críticos reproducibles y cubiertos por pruebas; reglas de negocio y permisos documentados; build y suites de pruebas en verde. La administración configurable de usuarios/roles se aborda en la Fase 1.
 
 ### Fase 1 — MVP operativo para residentes y portería
 
 **Objetivo:** reducir llamadas y coordinación manual en los flujos cotidianos de visitas, paquetes y comunicación.
 
 **Trabajo, en este orden:**
+- Completar primero la administración segura de usuarios y roles: SuperAdministrador global, selección de residencia, permisos granulares, alcance por residencia, límites contra la elevación de privilegios y desactivación que conserva el historial.
 - Completar avisos transaccionales al residente por encomienda y visita, inicialmente mediante un canal validado con conjuntos piloto. Reutilizar WhatsApp solo con consentimiento y requisitos de Meta cubiertos; considerar correo u otro canal como alternativa.
 - Implementar pre-registro de visitas desde el portal web: datos mínimos, persona/vehículo, anfitrión, vigencia, cancelación y estados.
 - Generar QR de invitación temporal y de un solo uso o con reglas explícitas de reutilización; validarlo en portería y registrar entrada/salida sin confundirlo con los QR permanentes de `accessCode`.
 - Completar el flujo de encomiendas con evidencia de entrega configurable, permisos de acceso a la evidencia y registro de eventos de notificación.
-- Implementar administración de usuarios: crear, editar y desactivar cuentas, con alcance de administrador limitado a su residencia, y sin eliminar registros históricos de auditoría.
-- Reemplazar los roles fijos actuales por roles configurables de permisos granulares asignados desde un catálogo seguro. Los administradores pueden crear, editar y desactivar roles de su residencia, sin asignar privilegios que no poseen ni crear o administrar SuperAdministradores.
-- Mantener el SuperAdministrador como rol privilegiado global, con acceso a todas las residencias y capacidades del sistema; proteger sus privilegios de la administración ordinaria de una residencia.
 - Añadir un canal de comunicados con audiencia, publicación, vigencia y confirmación de lectura si los pilotos la requieren.
 - Implementar PQRS con categorías, responsable, estados, vencimientos, comentarios visibles/internos y trazabilidad.
 - Verificar que el portal funcione bien en móvil antes de decidir si se requiere una aplicación nativa.
+
+**Estado de la primera entrega:** en curso en `feature/user-role-management`. El esquema, catálogo de permisos, middleware/rutas protegidas, selector de residencia y pantallas de usuarios/roles están implementados. Build de API/web, 11 pruebas unitarias y 14 de integración pasan; las pruebas de integración usan exclusivamente `resi_control_test`. La validación inicial en navegador cubrió el selector de residencia y la creación de un rol personalizado y una cuenta asignada a él. Falta recorrer en interfaz la edición/desactivación y cerrar el PR antes de dar esta entrega por terminada.
 
 **Criterio de salida:** residentes pueden usar los flujos acordados desde móvil; portería puede validar visitas pre-registradas; avisos y cambios de estado son auditables; permisos y consentimiento tienen pruebas.
 

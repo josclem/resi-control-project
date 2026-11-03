@@ -11,6 +11,8 @@ enum UserRole {
   SUPER_ADMINISTRADOR
   ADMINISTRADOR
   VIGILANTE
+  RESIDENTE
+  PERSONALIZADO
 }
 
 enum PersonType {
@@ -63,6 +65,7 @@ model Residence {
   accessLogs  AccessLog[]
   settings    SystemSetting[]
   deliveries  Delivery[]
+  customRoles CustomRole[]
 }
 
 model User {
@@ -75,10 +78,30 @@ model User {
   createdAt    DateTime @default(now())
   residenceId  Int      @default(1)
   residence    Residence @relation(fields: [residenceId], references: [id])
+  customRoleId Int?
+  customRole   CustomRole? @relation("UserCustomRole", fields: [customRoleId], references: [id])
   accessLogs   AccessLog[]
   authorizedAccessLogs AccessLog[] @relation("AccessOverride")
   receivedDeliveries Delivery[] @relation("DeliveryReceived")
   deliveredDeliveries Delivery[] @relation("DeliveryDelivered")
+  customRolesCreated CustomRole[] @relation("CustomRoleCreator")
+}
+
+model CustomRole {
+  id          Int      @id @default(autoincrement())
+  name        String
+  permissions String[]
+  active      Boolean  @default(true)
+  residenceId Int
+  createdById Int
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  residence   Residence @relation(fields: [residenceId], references: [id])
+  createdBy   User     @relation("CustomRoleCreator", fields: [createdById], references: [id])
+  users       User[]   @relation("UserCustomRole")
+
+  @@unique([residenceId, name])
+  @@index([residenceId, active])
 }
 
 model Person {

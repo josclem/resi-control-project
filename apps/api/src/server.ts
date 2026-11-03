@@ -5,6 +5,7 @@ import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { AccessType, PersonType, PrismaClient, UserRole, DeliveryStatus } from '@prisma/client';
 import { z } from 'zod';
+import { Permission, permissions, permissionsForRole } from './permissions.js';
 import {
   accessSchema,
   accessScanSchema,
@@ -18,11 +19,15 @@ import {
   residenceSchema,
   supervisorSchema,
   vehicleSchema,
+  userCreateSchema,
+  userUpdateSchema,
+  customRoleCreateSchema,
+  customRoleUpdateSchema,
   formatPhone,
   normalizeDocumentNumber,
 } from './validation.js';
 
-type AuthenticatedRequest = Request & { user?: { id: number; role: UserRole; residenceId: number } };
+type AuthenticatedRequest = Request & { user?: { id: number; role: UserRole; residenceId: number; permissions: Permission[]; roleName: string } };
 
 function createRequireAuth(prisma: PrismaClient, jwtSecret: string) {
   return async function requireAuth(req: AuthenticatedRequest, res: Response, next: NextFunction) {
@@ -31,9 +36,43 @@ function createRequireAuth(prisma: PrismaClient, jwtSecret: string) {
     try {
       const claims = jwt.verify(header.slice(7), jwtSecret) as { id?: number };
       if (!claims.id) return res.status(401).json({ message: 'Sesión inválida. Inicia sesión nuevamente.' });
-      const user = await prisma.user.findUnique({ where: { id: claims.id }, select: { id: true, role: true, residenceId: true, active: true } });
+      const user = await prisma.user.findUnique({
+        where: { id: claims.id },
+        select: {
+          id: true,
+          role: true,
+          residenceId: true,
+          customRoleId: true,
+          active: true,
+          customRole: { select: { id: true, name: true, permissions: true, active: true } },
+        },
+      });
       if (!user?.active) return res.status(401).json({ message: 'Usuario inactivo o inexistente.' });
-      req.user = { id: user.id, role: user.role, residenceId: user.residenceId };
+      if (user.role === UserRole.PERSONALIZADO && (!user.customRole?.active || user.customRole.id !== user.customRoleId)) {
+        return res.status(401).json({ message: 'El rol de este usuario está inactivo.' });
+      }
+      let residenceId = user.residenceId;
+      const requestedResidenceId = req.header('X-Residence-Id');
+      if (user.role === UserRole.SUPER_ADMINISTRADOR) {
+        if (requestedResidenceId !== undefined) {
+          const parsedResidenceId = Number(requestedResidenceId);
+          if (!Number.isSafeInteger(parsedResidenceId) || parsedResidenceId <= 0) {
+            return res.status(400).json({ message: 'La residencia seleccionada no es válida.' });
+          }
+          const residence = await prisma.residence.findFirst({ where: { id: parsedResidenceId, active: true }, select: { id: true } });
+          if (!residence) return res.status(404).json({ message: 'Residencia no encontrada o inactiva.' });
+          residenceId = residence.id;
+        }
+      } else if (requestedResidenceId !== undefined && requestedResidenceId !== String(user.residenceId)) {
+        return res.status(403).json({ message: 'No puedes operar fuera de tu residencia.' });
+      }
+      req.user = {
+        id: user.id,
+        role: user.role,
+        residenceId,
+        permissions: permissionsForRole(user.role, user.customRole?.permissions ?? []),
+        roleName: user.customRole?.name ?? user.role,
+      };
       return next();
     } catch {
       return res.status(401).json({ message: 'Token inválido o expirado' });
@@ -65,7 +104,7 @@ function photoData(file: Express.Multer.File) {
   return { data: new Uint8Array(file.buffer) as Uint8Array<ArrayBuffer>, mimeType: file.mimetype, fileName: file.originalname, size: file.size };
 }
 
-app.put('/api/people/:id', requireAuth, allowRoles(UserRole.SUPER_ADMINISTRADOR, UserRole.ADMINISTRADOR), async (req: AuthenticatedRequest, res, next) => {
+app.put('/api/people/:id', requireAuth, requirePermission('PEOPLE_MANAGE'), async (req: AuthenticatedRequest, res, next) => {
   try {
     const id = Number(req.params.id);
     const input = personSchema.parse(req.body);
@@ -81,7 +120,7 @@ app.put('/api/people/:id', requireAuth, allowRoles(UserRole.SUPER_ADMINISTRADOR,
   }
 });
 
-app.delete('/api/people/:id', requireAuth, allowRoles(UserRole.SUPER_ADMINISTRADOR, UserRole.ADMINISTRADOR), async (req: AuthenticatedRequest, res, next) => {
+app.delete('/api/people/:id', requireAuth, requirePermission('PEOPLE_MANAGE'), async (req: AuthenticatedRequest, res, next) => {
   try {
     const result = await prisma.person.updateMany({ where: { id: Number(req.params.id), residenceId: req.user!.residenceId }, data: { active: false } });
     if (!result.count) return res.status(404).json({ message: 'Persona no encontrada.' });
@@ -89,7 +128,7 @@ app.delete('/api/people/:id', requireAuth, allowRoles(UserRole.SUPER_ADMINISTRAD
   } catch (error) { return next(error); }
 });
 
-app.put('/api/people/:id/photo', requireAuth, allowRoles(UserRole.SUPER_ADMINISTRADOR, UserRole.ADMINISTRADOR), photoUpload.single('photo'), async (req: AuthenticatedRequest, res, next) => {
+app.put('/api/people/:id/photo', requireAuth, requirePermission('PEOPLE_MANAGE'), photoUpload.single('photo'), async (req: AuthenticatedRequest, res, next) => {
   try {
     if (!req.file) return res.status(400).json({ message: 'Selecciona una imagen JPG, PNG o WebP de máximo 2 MB.' });
     const person = await prisma.person.findFirst({ where: { id: Number(req.params.id), residenceId: req.user!.residenceId, active: true } });
@@ -98,7 +137,7 @@ app.put('/api/people/:id/photo', requireAuth, allowRoles(UserRole.SUPER_ADMINIST
   } catch (error) { return next(error); }
 });
 
-app.get('/api/people/:id/photo', requireAuth, async (req: AuthenticatedRequest, res, next) => {
+app.get('/api/people/:id/photo', requireAuth, requirePermission('PEOPLE_VIEW'), async (req: AuthenticatedRequest, res, next) => {
   try {
     const photo = await prisma.personPhoto.findFirst({ where: { personId: Number(req.params.id), person: { residenceId: req.user!.residenceId, active: true } } });
     if (!photo) return res.status(404).end();
@@ -106,11 +145,11 @@ app.get('/api/people/:id/photo', requireAuth, async (req: AuthenticatedRequest, 
   } catch (error) { return next(error); }
 });
 
-app.delete('/api/people/:id/photo', requireAuth, allowRoles(UserRole.SUPER_ADMINISTRADOR, UserRole.ADMINISTRADOR), async (req: AuthenticatedRequest, res, next) => {
+app.delete('/api/people/:id/photo', requireAuth, requirePermission('PEOPLE_MANAGE'), async (req: AuthenticatedRequest, res, next) => {
   try { await prisma.personPhoto.deleteMany({ where: { personId: Number(req.params.id), person: { residenceId: req.user!.residenceId } } }); return res.status(204).end(); }
   catch (error) { return next(error); }
 });
-app.put('/api/vehicles/:id', requireAuth, allowRoles(UserRole.SUPER_ADMINISTRADOR, UserRole.ADMINISTRADOR), async (req: AuthenticatedRequest, res, next) => {
+app.put('/api/vehicles/:id', requireAuth, requirePermission('VEHICLES_MANAGE'), async (req: AuthenticatedRequest, res, next) => {
   try {
     const input = vehicleSchema.parse(req.body);
     const vehicle = await prisma.vehicle.findFirst({ where: { id: Number(req.params.id), residenceId: req.user!.residenceId, active: true } });
@@ -125,7 +164,7 @@ app.put('/api/vehicles/:id', requireAuth, allowRoles(UserRole.SUPER_ADMINISTRADO
   }
 });
 
-app.delete('/api/vehicles/:id', requireAuth, allowRoles(UserRole.SUPER_ADMINISTRADOR, UserRole.ADMINISTRADOR), async (req: AuthenticatedRequest, res, next) => {
+app.delete('/api/vehicles/:id', requireAuth, requirePermission('VEHICLES_MANAGE'), async (req: AuthenticatedRequest, res, next) => {
   try {
     const result = await prisma.vehicle.updateMany({ where: { id: Number(req.params.id), residenceId: req.user!.residenceId }, data: { active: false } });
     if (!result.count) return res.status(404).json({ message: 'Vehículo no encontrado.' });
@@ -133,7 +172,7 @@ app.delete('/api/vehicles/:id', requireAuth, allowRoles(UserRole.SUPER_ADMINISTR
   } catch (error) { return next(error); }
 });
 
-app.put('/api/vehicles/:id/photo', requireAuth, allowRoles(UserRole.SUPER_ADMINISTRADOR, UserRole.ADMINISTRADOR), photoUpload.single('photo'), async (req: AuthenticatedRequest, res, next) => {
+app.put('/api/vehicles/:id/photo', requireAuth, requirePermission('VEHICLES_MANAGE'), photoUpload.single('photo'), async (req: AuthenticatedRequest, res, next) => {
   try {
     if (!req.file) return res.status(400).json({ message: 'Selecciona una imagen JPG, PNG o WebP de máximo 2 MB.' });
     const vehicle = await prisma.vehicle.findFirst({ where: { id: Number(req.params.id), residenceId: req.user!.residenceId, active: true } });
@@ -142,7 +181,7 @@ app.put('/api/vehicles/:id/photo', requireAuth, allowRoles(UserRole.SUPER_ADMINI
   } catch (error) { return next(error); }
 });
 
-app.get('/api/vehicles/:id/photo', requireAuth, async (req: AuthenticatedRequest, res, next) => {
+app.get('/api/vehicles/:id/photo', requireAuth, requirePermission('VEHICLES_VIEW'), async (req: AuthenticatedRequest, res, next) => {
   try {
     const photo = await prisma.vehiclePhoto.findFirst({ where: { vehicleId: Number(req.params.id), vehicle: { residenceId: req.user!.residenceId, active: true } } });
     if (!photo) return res.status(404).end();
@@ -150,7 +189,7 @@ app.get('/api/vehicles/:id/photo', requireAuth, async (req: AuthenticatedRequest
   } catch (error) { return next(error); }
 });
 
-app.delete('/api/vehicles/:id/photo', requireAuth, allowRoles(UserRole.SUPER_ADMINISTRADOR, UserRole.ADMINISTRADOR), async (req: AuthenticatedRequest, res, next) => {
+app.delete('/api/vehicles/:id/photo', requireAuth, requirePermission('VEHICLES_MANAGE'), async (req: AuthenticatedRequest, res, next) => {
   try { await prisma.vehiclePhoto.deleteMany({ where: { vehicleId: Number(req.params.id), vehicle: { residenceId: req.user!.residenceId } } }); return res.status(204).end(); }
   catch (error) { return next(error); }
 });
@@ -163,6 +202,22 @@ const logoUpload = multer({
 function allowRoles(...roles: UserRole[]) {
   return (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     if (!req.user || !roles.includes(req.user.role)) return res.status(403).json({ message: 'Permisos insuficientes' });
+    return next();
+  };
+}
+
+function requirePermission(permission: Permission) {
+  return (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    if (!req.user?.permissions.includes(permission)) return res.status(403).json({ message: 'Permisos insuficientes.' });
+    return next();
+  };
+}
+
+function requireAnyPermission(...requestedPermissions: Permission[]) {
+  return (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    if (!req.user || !requestedPermissions.some((permission) => req.user!.permissions.includes(permission))) {
+      return res.status(403).json({ message: 'Permisos insuficientes.' });
+    }
     return next();
   };
 }
@@ -184,7 +239,7 @@ app.get('/api/residence', requireAuth, async (req: AuthenticatedRequest, res, ne
   } catch (error) { return next(error); }
 });
 
-app.get('/api/residence/logo', requireAuth, async (req: AuthenticatedRequest, res, next) => {
+app.get('/api/residence/logo', requireAuth, requirePermission('SETTINGS_VIEW'), async (req: AuthenticatedRequest, res, next) => {
   try {
     const residence = await prisma.residence.findUnique({ where: { id: req.user!.residenceId }, select: { logoData: true, logoMimeType: true } });
     if (!residence?.logoData || !residence.logoMimeType) return res.status(404).end();
@@ -192,7 +247,7 @@ app.get('/api/residence/logo', requireAuth, async (req: AuthenticatedRequest, re
   } catch (error) { return next(error); }
 });
 
-app.put('/api/residence', requireAuth, allowRoles(UserRole.SUPER_ADMINISTRADOR, UserRole.ADMINISTRADOR), logoUpload.single('logo'), async (req: AuthenticatedRequest, res, next) => {
+app.put('/api/residence', requireAuth, requirePermission('SETTINGS_MANAGE'), logoUpload.single('logo'), async (req: AuthenticatedRequest, res, next) => {
   try {
     const input = residenceSchema.parse(req.body);
     const file = req.file;
@@ -220,13 +275,299 @@ app.post('/api/auth/login', async (req, res, next) => {
       return res.status(401).json({ message: 'Credenciales inválidas' });
     }
     const token = jwt.sign({ id: user.id, role: user.role, residenceId: user.residenceId }, jwtSecret, { expiresIn: '8h' });
-    return res.json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role, residenceId: user.residenceId } });
+    const availableResidences = user.role === UserRole.SUPER_ADMINISTRADOR
+      ? await prisma.residence.findMany({ where: { active: true }, select: { id: true, name: true, code: true }, orderBy: { name: 'asc' } })
+      : [];
+    const customRole = user.customRoleId
+      ? await prisma.customRole.findUnique({ where: { id: user.customRoleId }, select: { name: true, permissions: true, active: true } })
+      : null;
+    if (user.role === UserRole.PERSONALIZADO && !customRole?.active) return res.status(401).json({ message: 'El rol de este usuario está inactivo.' });
+    return res.json({
+      token,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        roleName: customRole?.name ?? user.role,
+        permissions: permissionsForRole(user.role, customRole?.permissions ?? []),
+        residenceId: user.residenceId,
+        availableResidences,
+      },
+    });
   } catch (error) {
     return next(error);
   }
 });
 
-app.get('/api/dashboard', requireAuth, async (_req: AuthenticatedRequest, res, next) => {
+const userResponse = {
+  id: true,
+  name: true,
+  email: true,
+  role: true,
+  customRoleId: true,
+  active: true,
+  residenceId: true,
+  createdAt: true,
+  customRole: { select: { id: true, name: true, active: true, permissions: true } },
+};
+
+function isAdministratorRole(role: { role: UserRole; customRole?: { permissions: string[] } | null }) {
+  return role.role !== UserRole.SUPER_ADMINISTRADOR
+    && permissionsForRole(role.role, role.customRole?.permissions ?? []).includes('USERS_MANAGE');
+}
+
+function canAssignPermissions(available: Permission[], requested: Permission[]) {
+  return requested.every((permission) => available.includes(permission));
+}
+
+app.get('/api/admin/residences', requireAuth, allowRoles(UserRole.SUPER_ADMINISTRADOR), async (_req, res, next) => {
+  try {
+    return res.json(await prisma.residence.findMany({
+      where: { active: true },
+      select: { id: true, name: true, code: true },
+      orderBy: { name: 'asc' },
+    }));
+  } catch (error) { return next(error); }
+});
+
+app.get('/api/admin/roles', requireAuth, requireAnyPermission('ROLES_MANAGE', 'USERS_MANAGE'), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const builtInRoles = [UserRole.ADMINISTRADOR, UserRole.VIGILANTE].map((role) => ({
+      id: null,
+      key: role,
+      name: role === UserRole.ADMINISTRADOR ? 'Administrador' : 'Vigilante',
+      active: true,
+      system: true,
+      permissions: permissionsForRole(role),
+      assignable: canAssignPermissions(req.user!.permissions, permissionsForRole(role)),
+    }));
+    const customRoles = await prisma.customRole.findMany({
+      where: { residenceId: req.user!.residenceId },
+      select: { id: true, name: true, active: true, permissions: true, residenceId: true },
+      orderBy: [{ active: 'desc' }, { name: 'asc' }],
+    });
+    return res.json({
+      permissions: permissions.filter((permission) => permission !== 'RESIDENCES_MANAGE'),
+      roles: [...builtInRoles, ...customRoles.map((role) => ({
+        ...role,
+        key: `CUSTOM:${role.id}`,
+        system: false,
+        assignable: canAssignPermissions(req.user!.permissions, permissionsForRole(UserRole.PERSONALIZADO, role.permissions)),
+      }))],
+    });
+  } catch (error) { return next(error); }
+});
+
+app.post('/api/admin/roles', requireAuth, requirePermission('ROLES_MANAGE'), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const input = customRoleCreateSchema.parse(req.body);
+    if (input.permissions.includes('RESIDENCES_MANAGE') || input.permissions.some((permission) => !req.user!.permissions.includes(permission))) {
+      return res.status(403).json({ message: 'No puedes asignar permisos que no tienes.' });
+    }
+    const role = await prisma.customRole.create({
+      data: { name: input.name, permissions: input.permissions, residenceId: req.user!.residenceId, createdById: req.user!.id },
+      select: { id: true, name: true, permissions: true, active: true, residenceId: true },
+    });
+    return res.status(201).json(role);
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'P2002') return res.status(409).json({ message: 'Ya existe un rol con ese nombre en la residencia.' });
+    return next(error);
+  }
+});
+
+app.put('/api/admin/roles/:id', requireAuth, requirePermission('ROLES_MANAGE'), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ message: 'Identificador de rol inválido.' });
+    const input = customRoleUpdateSchema.parse(req.body);
+    const existing = await prisma.customRole.findFirst({ where: { id, residenceId: req.user!.residenceId, active: true } });
+    if (!existing) return res.status(404).json({ message: 'Rol personalizado no encontrado.' });
+    if (input.permissions?.some((permission) => permission === 'RESIDENCES_MANAGE' || !req.user!.permissions.includes(permission))) {
+      return res.status(403).json({ message: 'No puedes asignar permisos que no tienes.' });
+    }
+    const updatedPermissions = input.permissions ?? existing.permissions;
+    if (existing.permissions.includes('USERS_MANAGE') && !updatedPermissions.includes('USERS_MANAGE')) {
+      const activeUsers = await prisma.user.findMany({
+        where: { residenceId: req.user!.residenceId, active: true },
+        include: { customRole: { select: { permissions: true } } },
+      });
+      const remainingAdministrators = activeUsers
+        .filter((user) => user.customRoleId !== id)
+        .filter(isAdministratorRole);
+      if (remainingAdministrators.length === 0) {
+        return res.status(409).json({ message: 'La residencia debe conservar al menos un usuario con permiso de administrar usuarios.' });
+      }
+    }
+    return res.json(await prisma.customRole.update({
+      where: { id },
+      data: input,
+      select: { id: true, name: true, permissions: true, active: true, residenceId: true },
+    }));
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'P2002') return res.status(409).json({ message: 'Ya existe un rol con ese nombre en la residencia.' });
+    return next(error);
+  }
+});
+
+app.delete('/api/admin/roles/:id', requireAuth, requirePermission('ROLES_MANAGE'), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ message: 'Identificador de rol inválido.' });
+    const role = await prisma.customRole.findFirst({ where: { id, residenceId: req.user!.residenceId, active: true } });
+    if (!role) return res.status(404).json({ message: 'Rol personalizado no encontrado.' });
+    const assignedUsers = await prisma.user.count({ where: { customRoleId: id } });
+    if (assignedUsers > 0) return res.status(409).json({ message: 'No puedes desactivar un rol asignado a cuentas de usuario.' });
+    await prisma.customRole.update({ where: { id }, data: { active: false } });
+    return res.status(204).end();
+  } catch (error) { return next(error); }
+});
+
+app.get('/api/admin/users', requireAuth, requirePermission('USERS_MANAGE'), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const users = await prisma.user.findMany({
+      where: { residenceId: req.user!.residenceId },
+      select: userResponse,
+      orderBy: [{ active: 'desc' }, { name: 'asc' }],
+    });
+    return res.json(users.filter((user) => canAssignPermissions(
+      req.user!.permissions,
+      permissionsForRole(user.role, user.customRole?.permissions ?? []),
+    )));
+  } catch (error) { return next(error); }
+});
+
+app.post('/api/admin/users', requireAuth, requirePermission('USERS_MANAGE'), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const input = userCreateSchema.parse(req.body);
+    if (input.role === 'SUPER_ADMINISTRADOR' && req.user!.role !== UserRole.SUPER_ADMINISTRADOR) {
+      return res.status(403).json({ message: 'Solo el SuperAdministrador global puede crear otras cuentas globales.' });
+    }
+    if (input.role !== 'PERSONALIZADO' && !canAssignPermissions(req.user!.permissions, permissionsForRole(input.role))) {
+      return res.status(403).json({ message: 'No puedes asignar un rol con permisos que no tienes.' });
+    }
+    if (input.role === 'PERSONALIZADO') {
+      const role = await prisma.customRole.findFirst({ where: { id: input.customRoleId, residenceId: req.user!.residenceId, active: true } });
+      if (!role) return res.status(400).json({ message: 'El rol personalizado no existe o está inactivo.' });
+      if (!canAssignPermissions(req.user!.permissions, role.permissions as Permission[])) {
+        return res.status(403).json({ message: 'No puedes asignar un rol con permisos que no tienes.' });
+      }
+    }
+    const user = await prisma.user.create({
+      data: {
+        name: input.name,
+        email: input.email,
+        passwordHash: await bcrypt.hash(input.password, 12),
+        role: input.role as UserRole,
+        customRoleId: input.customRoleId ?? null,
+        residenceId: req.user!.residenceId,
+      },
+      select: userResponse,
+    });
+    return res.status(201).json(user);
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'P2002') return res.status(409).json({ message: 'Ya existe una cuenta con ese correo.' });
+    return next(error);
+  }
+});
+
+app.put('/api/admin/users/:id', requireAuth, requirePermission('USERS_MANAGE'), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ message: 'Identificador de usuario inválido.' });
+    const input = userUpdateSchema.parse(req.body);
+    const existing = await prisma.user.findFirst({
+      where: { id, residenceId: req.user!.residenceId, active: true },
+      include: { customRole: { select: { permissions: true } } },
+    });
+    if (!existing || (existing.role === UserRole.SUPER_ADMINISTRADOR && req.user!.role !== UserRole.SUPER_ADMINISTRADOR)) {
+      return res.status(404).json({ message: 'Usuario no encontrado.' });
+    }
+    if (existing.role === UserRole.SUPER_ADMINISTRADOR && (input.role !== undefined || input.customRoleId !== undefined)) {
+      return res.status(400).json({ message: 'El rol global de SuperAdministrador no se puede cambiar desde esta pantalla.' });
+    }
+    if (!canAssignPermissions(req.user!.permissions, permissionsForRole(existing.role, existing.customRole?.permissions ?? []))) {
+      return res.status(403).json({ message: 'No puedes administrar una cuenta con permisos superiores a los tuyos.' });
+    }
+    const nextRole = input.role ?? existing.role;
+    const nextCustomRoleId = nextRole === UserRole.PERSONALIZADO ? input.customRoleId ?? existing.customRoleId : null;
+    let nextPermissions: Permission[] = [];
+    if (nextRole === UserRole.PERSONALIZADO) {
+      const role = await prisma.customRole.findFirst({ where: { id: nextCustomRoleId ?? undefined, residenceId: req.user!.residenceId, active: true } });
+      if (!role) return res.status(400).json({ message: 'El rol personalizado no existe o está inactivo.' });
+      nextPermissions = permissionsForRole(UserRole.PERSONALIZADO, role.permissions);
+      if (!canAssignPermissions(req.user!.permissions, nextPermissions)) {
+        return res.status(403).json({ message: 'No puedes asignar un rol con permisos que no tienes.' });
+      }
+    } else {
+      nextPermissions = permissionsForRole(nextRole);
+      if (!canAssignPermissions(req.user!.permissions, nextPermissions)) {
+        return res.status(403).json({ message: 'No puedes asignar un rol con permisos que no tienes.' });
+      }
+    }
+    if (isAdministratorRole(existing) && !nextPermissions.includes('USERS_MANAGE')) {
+      const admins = await prisma.user.findMany({
+        where: { residenceId: req.user!.residenceId, active: true },
+        include: { customRole: { select: { permissions: true } } },
+      });
+      if (admins.filter(isAdministratorRole).length <= 1) return res.status(409).json({ message: 'La residencia debe conservar al menos un administrador activo.' });
+    }
+    const updated = await prisma.user.update({
+      where: { id },
+      data: {
+        ...(input.name !== undefined ? { name: input.name } : {}),
+        ...(input.email !== undefined ? { email: input.email } : {}),
+        ...(input.password ? { passwordHash: await bcrypt.hash(input.password, 12) } : {}),
+        ...(input.role !== undefined ? { role: input.role as UserRole } : {}),
+        ...(input.role !== undefined || input.customRoleId !== undefined ? { customRoleId: nextCustomRoleId } : {}),
+      },
+      select: userResponse,
+    });
+    return res.json(updated);
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'P2002') return res.status(409).json({ message: 'Ya existe una cuenta con ese correo.' });
+    return next(error);
+  }
+});
+
+app.patch('/api/admin/users/:id/active', requireAuth, requirePermission('USERS_MANAGE'), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const input = z.object({ active: z.boolean() }).parse(req.body);
+    if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ message: 'Identificador de usuario inválido.' });
+    if (id === req.user!.id) return res.status(400).json({ message: 'No puedes desactivar tu propia cuenta.' });
+    const target = await prisma.user.findFirst({
+      where: { id, residenceId: req.user!.residenceId },
+      include: { customRole: { select: { permissions: true, active: true } } },
+    });
+    if (!target) return res.status(404).json({ message: 'Usuario no encontrado.' });
+    if (target.role !== UserRole.SUPER_ADMINISTRADOR
+      && !canAssignPermissions(req.user!.permissions, permissionsForRole(target.role, target.customRole?.permissions ?? []))) {
+      return res.status(403).json({ message: 'No puedes administrar una cuenta con permisos superiores a los tuyos.' });
+    }
+    if (input.active && target.role === UserRole.PERSONALIZADO && !target.customRole?.active) {
+      return res.status(409).json({ message: 'El rol personalizado está inactivo. Asígnale otro rol antes de reactivar la cuenta.' });
+    }
+    if (!input.active && target.active && isAdministratorRole(target)) {
+      const admins = await prisma.user.findMany({
+        where: { residenceId: req.user!.residenceId, active: true },
+        include: { customRole: { select: { permissions: true } } },
+      });
+      if (admins.filter(isAdministratorRole).length <= 1) return res.status(409).json({ message: 'La residencia debe conservar al menos un administrador activo.' });
+    }
+    if (target.role === UserRole.SUPER_ADMINISTRADOR) {
+      if (req.user!.role !== UserRole.SUPER_ADMINISTRADOR) return res.status(403).json({ message: 'Solo el SuperAdministrador puede administrar otra cuenta global.' });
+      if (!input.active) {
+        const activeSuperAdmins = await prisma.user.count({ where: { role: UserRole.SUPER_ADMINISTRADOR, active: true } });
+        if (activeSuperAdmins <= 1) return res.status(409).json({ message: 'El sistema debe conservar al menos un SuperAdministrador activo.' });
+      }
+    }
+    const user = await prisma.user.update({ where: { id }, data: { active: input.active }, select: userResponse });
+    return res.json(user);
+  } catch (error) { return next(error); }
+});
+
+app.get('/api/dashboard', requireAuth, requirePermission('DASHBOARD_VIEW'), async (_req: AuthenticatedRequest, res, next) => {
   try {
     const [latest, residents, visitors, today, pendingDeliveries] = await Promise.all([
       prisma.accessLog.findMany({ where: { residenceId: _req.user!.residenceId }, take: 10, orderBy: { occurredAt: 'desc' }, include: { person: { include: { photo: { select: { data: true, mimeType: true } } } }, vehicle: { include: { photo: { select: { data: true, mimeType: true } } } } } }),
@@ -256,7 +597,7 @@ app.get('/api/dashboard', requireAuth, async (_req: AuthenticatedRequest, res, n
   }
 });
 
-app.get('/api/people', requireAuth, async (_req: AuthenticatedRequest, res, next) => {
+app.get('/api/people', requireAuth, requirePermission('PEOPLE_VIEW'), async (_req: AuthenticatedRequest, res, next) => {
   try {
     const people = await prisma.person.findMany({ where: { residenceId: _req.user!.residenceId, active: true }, orderBy: { fullName: 'asc' }, include: { documentType: true, photo: { select: { data: true, mimeType: true } } } });
     return res.json(people.map(({ photo, ...person }) => ({
@@ -268,7 +609,7 @@ app.get('/api/people', requireAuth, async (_req: AuthenticatedRequest, res, next
   }
 });
 
-app.get('/api/vehicles', requireAuth, async (_req: AuthenticatedRequest, res, next) => {
+app.get('/api/vehicles', requireAuth, requirePermission('VEHICLES_VIEW'), async (_req: AuthenticatedRequest, res, next) => {
   try {
     const vehicles = await prisma.vehicle.findMany({
       where: { residenceId: _req.user!.residenceId, active: true },
@@ -282,7 +623,7 @@ app.get('/api/vehicles', requireAuth, async (_req: AuthenticatedRequest, res, ne
   } catch (error) { return next(error); }
 });
 
-app.post('/api/vehicles', requireAuth, allowRoles(UserRole.SUPER_ADMINISTRADOR, UserRole.ADMINISTRADOR), async (req: AuthenticatedRequest, res, next) => {
+app.post('/api/vehicles', requireAuth, requirePermission('VEHICLES_MANAGE'), async (req: AuthenticatedRequest, res, next) => {
   try {
     const input = vehicleSchema.parse(req.body);
     const plate = input.plate.replace(/[\s-]/g, '').toUpperCase();
@@ -306,7 +647,7 @@ const deliveryRelations = {
   deliveredBy: { select: { id: true, name: true } },
 };
 
-app.get('/api/deliveries', requireAuth, async (req: AuthenticatedRequest, res, next) => {
+app.get('/api/deliveries', requireAuth, requirePermission('DELIVERIES_VIEW'), async (req: AuthenticatedRequest, res, next) => {
   try {
     let status: DeliveryStatus | undefined;
     if (req.query.status !== undefined) {
@@ -327,7 +668,7 @@ app.get('/api/deliveries', requireAuth, async (req: AuthenticatedRequest, res, n
   }
 });
 
-app.post('/api/deliveries', requireAuth, async (req: AuthenticatedRequest, res, next) => {
+app.post('/api/deliveries', requireAuth, requirePermission('DELIVERIES_MANAGE'), async (req: AuthenticatedRequest, res, next) => {
   try {
     const input = deliveryCreateSchema.parse(req.body);
     const person = await prisma.person.findFirst({
@@ -354,7 +695,7 @@ app.post('/api/deliveries', requireAuth, async (req: AuthenticatedRequest, res, 
   }
 });
 
-app.put('/api/deliveries/:id/status', requireAuth, async (req: AuthenticatedRequest, res, next) => {
+app.put('/api/deliveries/:id/status', requireAuth, requirePermission('DELIVERIES_MANAGE'), async (req: AuthenticatedRequest, res, next) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: 'Identificador inválido.' });
@@ -401,7 +742,7 @@ app.put('/api/deliveries/:id/status', requireAuth, async (req: AuthenticatedRequ
   }
 });
 
-app.get('/api/document-types', requireAuth, async (_req, res, next) => {
+app.get('/api/document-types', requireAuth, requirePermission('PEOPLE_VIEW'), async (_req, res, next) => {
   try {
     return res.json(await prisma.documentType.findMany({ where: { active: true }, orderBy: { code: 'asc' } }));
   } catch (error) {
@@ -409,14 +750,14 @@ app.get('/api/document-types', requireAuth, async (_req, res, next) => {
   }
 });
 
-app.get('/api/settings/irregular-access', requireAuth, async (_req: AuthenticatedRequest, res, next) => {
+app.get('/api/settings/irregular-access', requireAuth, requirePermission('SETTINGS_VIEW'), async (_req: AuthenticatedRequest, res, next) => {
   try {
     const setting = await prisma.systemSetting.findUnique({ where: { residenceId_key: { residenceId: _req.user!.residenceId, key: 'irregular_access_mode' } } });
     return res.json({ mode: irregularAccessModeSchema.parse(setting?.value ?? 'BLOCK') });
   } catch (error) { return next(error); }
 });
 
-app.put('/api/settings/irregular-access', requireAuth, allowRoles(UserRole.SUPER_ADMINISTRADOR, UserRole.ADMINISTRADOR), async (req: AuthenticatedRequest, res, next) => {
+app.put('/api/settings/irregular-access', requireAuth, requirePermission('SETTINGS_MANAGE'), async (req: AuthenticatedRequest, res, next) => {
   try {
     const mode = irregularAccessModeSchema.parse(req.body.mode);
     await prisma.systemSetting.upsert({
@@ -429,14 +770,14 @@ app.put('/api/settings/irregular-access', requireAuth, allowRoles(UserRole.SUPER
   } catch (error) { return next(error); }
 });
 
-app.get('/api/settings/access-capture', requireAuth, async (req: AuthenticatedRequest, res, next) => {
+app.get('/api/settings/access-capture', requireAuth, requirePermission('SETTINGS_VIEW'), async (req: AuthenticatedRequest, res, next) => {
   try {
     const setting = await prisma.systemSetting.findUnique({ where: { residenceId_key: { residenceId: req.user!.residenceId, key: 'access_capture_mode' } } });
     return res.json({ mode: accessCaptureModeSchema.parse(setting?.value ?? 'MANUAL') });
   } catch (error) { return next(error); }
 });
 
-app.put('/api/settings/access-capture', requireAuth, allowRoles(UserRole.SUPER_ADMINISTRADOR, UserRole.ADMINISTRADOR), async (req: AuthenticatedRequest, res, next) => {
+app.put('/api/settings/access-capture', requireAuth, requirePermission('SETTINGS_MANAGE'), async (req: AuthenticatedRequest, res, next) => {
   try {
     const mode = accessCaptureModeSchema.parse(req.body.mode);
     await prisma.systemSetting.upsert({
@@ -448,7 +789,7 @@ app.put('/api/settings/access-capture', requireAuth, allowRoles(UserRole.SUPER_A
   } catch (error) { return next(error); }
 });
 
-app.post('/api/people', requireAuth, allowRoles(UserRole.SUPER_ADMINISTRADOR, UserRole.ADMINISTRADOR), async (req: AuthenticatedRequest, res, next) => {
+app.post('/api/people', requireAuth, requirePermission('PEOPLE_MANAGE'), async (req: AuthenticatedRequest, res, next) => {
   try {
     const input = personSchema.parse(req.body);
     const phone = input.phone ? formatPhone(input.phone) : undefined;
@@ -470,7 +811,7 @@ app.post('/api/people', requireAuth, allowRoles(UserRole.SUPER_ADMINISTRADOR, Us
   }
 });
 
-app.post('/api/access/scan', requireAuth, async (req: AuthenticatedRequest, res, next) => {
+app.post('/api/access/scan', requireAuth, requirePermission('ACCESS_REGISTER'), async (req: AuthenticatedRequest, res, next) => {
   try {
     const { code } = accessScanSchema.parse(req.body);
     const vehicle = await prisma.vehicle.findFirst({
@@ -498,7 +839,7 @@ app.post('/api/access/scan', requireAuth, async (req: AuthenticatedRequest, res,
   } catch (error) { return next(error); }
 });
 
-app.post('/api/access', requireAuth, async (req: AuthenticatedRequest, res, next) => {
+app.post('/api/access', requireAuth, requirePermission('ACCESS_REGISTER'), async (req: AuthenticatedRequest, res, next) => {
   try {
     const input = accessSchema.parse(req.body);
     const result = await prisma.$transaction(async (transaction) => {
@@ -552,7 +893,7 @@ app.post('/api/access', requireAuth, async (req: AuthenticatedRequest, res, next
   }
 });
 
-app.get('/api/reports/access', requireAuth, async (req: AuthenticatedRequest, res, next) => {
+app.get('/api/reports/access', requireAuth, requirePermission('REPORTS_VIEW'), async (req: AuthenticatedRequest, res, next) => {
   try {
     const from = req.query.from ? new Date(String(req.query.from)) : new Date(new Date().setHours(0, 0, 0, 0));
     const to = req.query.to ? new Date(String(req.query.to)) : new Date();

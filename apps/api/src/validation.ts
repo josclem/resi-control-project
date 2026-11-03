@@ -1,5 +1,6 @@
 import { AccessType, BuildingSectionType, DeliveryStatus, DeliveryType, PersonType, VehicleType } from '@prisma/client';
 import { z } from 'zod';
+import { permissions } from './permissions.js';
 
 export const loginSchema = z.object({ email: z.string().email(), password: z.string().min(1) });
 export const accessSchema = z.object({
@@ -47,6 +48,47 @@ export const irregularAccessModeSchema = z.enum(['BLOCK', 'SUPERVISOR']);
 export const accessCaptureModeSchema = z.enum(['MANUAL', 'BARCODE', 'QR', 'FINGERPRINT']);
 export const supervisorSchema = z.object({ email: z.string().email(), password: z.string().min(1) });
 export const residenceSchema = z.object({ name: z.string().trim().min(2).max(120) });
+const userRoleSchema = z.enum(['SUPER_ADMINISTRADOR', 'ADMINISTRADOR', 'VIGILANTE', 'PERSONALIZADO']);
+const rolePermissionsSchema = z.array(z.enum(permissions)).max(permissions.length).refine(
+  (values) => new Set(values).size === values.length,
+  'No se pueden repetir permisos.',
+);
+export const userCreateSchema = z.object({
+  name: z.string().trim().min(2).max(120),
+  email: z.string().trim().email().max(254).transform((value) => value.toLowerCase()),
+  password: z.string().min(12).max(128),
+  role: userRoleSchema,
+  customRoleId: z.number().int().positive().optional(),
+  residenceId: z.number().int().positive().optional(),
+}).superRefine((value, context) => {
+  if ((value.role === 'PERSONALIZADO') !== Boolean(value.customRoleId)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['customRoleId'], message: 'Selecciona un rol personalizado válido.' });
+  }
+});
+export const userUpdateSchema = z.object({
+  name: z.string().trim().min(2).max(120).optional(),
+  email: z.string().trim().email().max(254).transform((value) => value.toLowerCase()).optional(),
+  password: z.string().min(12).max(128).optional(),
+  role: userRoleSchema.optional(),
+  customRoleId: z.number().int().positive().nullable().optional(),
+}).superRefine((value, context) => {
+  if (Object.keys(value).length === 0) context.addIssue({ code: z.ZodIssueCode.custom, message: 'Indica al menos un campo para actualizar.' });
+  if (value.role === 'PERSONALIZADO' && !value.customRoleId) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['customRoleId'], message: 'Selecciona un rol personalizado válido.' });
+  }
+  if (value.role && value.role !== 'PERSONALIZADO' && value.customRoleId) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['customRoleId'], message: 'Los roles predefinidos no usan un rol personalizado.' });
+  }
+});
+export const customRoleCreateSchema = z.object({
+  name: z.string().trim().min(2).max(60),
+  permissions: rolePermissionsSchema,
+  residenceId: z.number().int().positive().optional(),
+});
+export const customRoleUpdateSchema = z.object({
+  name: z.string().trim().min(2).max(60).optional(),
+  permissions: rolePermissionsSchema.optional(),
+}).refine((value) => Object.keys(value).length > 0, 'Indica al menos un campo para actualizar.');
 export const vehicleSchema = z.object({
   plate: z.string().trim().min(5).max(10),
   type: z.nativeEnum(VehicleType),
