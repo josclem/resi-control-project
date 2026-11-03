@@ -1,7 +1,7 @@
 import { AccessType, BuildingSectionType, DeliveryStatus, DeliveryType, PersonType, VehicleType } from '@prisma/client';
 import { z } from 'zod';
 
-export const loginSchema = z.object({ email: z.string().email(), password: z.string().min(1) });
+export const loginSchema = z.object({ email: z.string().trim().email().transform((value) => value.toLowerCase()), password: z.string().min(1) });
 export const accessSchema = z.object({
   personId: z.number().int().positive(),
   vehicleId: z.number().int().positive().optional(),
@@ -45,6 +45,31 @@ export const personSchema = z.object({
 });
 export const irregularAccessModeSchema = z.enum(['BLOCK', 'SUPERVISOR']);
 export const accessCaptureModeSchema = z.enum(['MANUAL', 'BARCODE', 'QR', 'FINGERPRINT']);
+export const whatsappPhoneSchema = z.object({
+  phone: z.string().trim().max(30),
+});
+export const residentInvitationSchema = z.object({
+  personId: z.number().int().positive(),
+  whatsappOptInConfirmed: z.boolean(),
+});
+export const residentActivationSchema = z.object({
+  code: z.string().regex(/^\d{6}$/).optional(),
+  token: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+  phone: z.string().trim().min(1).max(30).optional(),
+  email: z.string().trim().email().max(254).transform((value) => value.toLowerCase()),
+  password: z.string().min(12).max(128),
+  consentToWhatsapp: z.boolean(),
+}).superRefine((value, context) => {
+  if (Boolean(value.code) === Boolean(value.token)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['code'], message: 'Ingresa un código o un enlace de activación válido.' });
+  }
+  if (value.code && !value.phone) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['phone'], message: 'El número que recibió el código es obligatorio.' });
+  }
+});
+export const residentNotificationConsentSchema = z.object({
+  consented: z.boolean(),
+});
 export const supervisorSchema = z.object({ email: z.string().email(), password: z.string().min(1) });
 export const residenceSchema = z.object({ name: z.string().trim().min(2).max(120) });
 export const vehicleSchema = z.object({
@@ -61,6 +86,23 @@ export function formatPhone(phone: string) {
   const national = digits.startsWith('57') && digits.length === 12 ? digits.slice(2) : digits;
   if (national.length !== 10) throw new Error('El teléfono debe tener 10 dígitos para Colombia.');
   return `(+57) ${national.slice(0, 3)} ${national.slice(3, 6)} ${national.slice(6)}`;
+}
+
+export function normalizeWhatsAppPhone(phone: string) {
+  const digits = phone.replace(/\D/g, '');
+  const national = digits.startsWith('57') && digits.length === 12 ? digits.slice(2) : digits;
+  if (!/^3\d{9}$/.test(national)) {
+    throw new Error('Ingresa un número móvil colombiano válido de 10 dígitos.');
+  }
+  return `+57${national}`;
+}
+
+export function normalizeWhatsAppBusinessPhone(phone: string) {
+  const digits = phone.replace(/\D/g, '');
+  if (/^3\d{9}$/.test(digits)) return `+57${digits}`;
+  if (/^57\d{10}$/.test(digits) && digits[2] === '3') return `+${digits}`;
+  if ((phone.trim().startsWith('+') || digits.length !== 10) && /^[1-9]\d{7,14}$/.test(digits)) return `+${digits}`;
+  throw new Error('Ingresa un número de WhatsApp válido en formato internacional.');
 }
 
 export function normalizeDocumentNumber(documentNumber: string) {

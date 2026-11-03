@@ -11,6 +11,7 @@ enum UserRole {
   SUPER_ADMINISTRADOR
   ADMINISTRADOR
   VIGILANTE
+  RESIDENTE
 }
 
 enum PersonType {
@@ -49,6 +50,17 @@ enum DeliveryStatus {
   DEVUELTA
 }
 
+enum ResidentNotificationConsentStatus {
+  GRANTED
+  DECLINED
+  REVOKED
+}
+
+enum ResidentNotificationConsentSource {
+  INVITATION
+  PORTAL
+}
+
 model Residence {
   id          Int             @id @default(autoincrement())
   name        String
@@ -63,6 +75,7 @@ model Residence {
   accessLogs  AccessLog[]
   settings    SystemSetting[]
   deliveries  Delivery[]
+  residentInvitations ResidentInvitation[]
 }
 
 model User {
@@ -75,10 +88,16 @@ model User {
   createdAt    DateTime @default(now())
   residenceId  Int      @default(1)
   residence    Residence @relation(fields: [residenceId], references: [id])
+  personId     Int?     @unique
+  person       Person?  @relation(fields: [personId], references: [id])
+  whatsappVerifiedAt DateTime?
   accessLogs   AccessLog[]
   authorizedAccessLogs AccessLog[] @relation("AccessOverride")
   receivedDeliveries Delivery[] @relation("DeliveryReceived")
   deliveredDeliveries Delivery[] @relation("DeliveryDelivered")
+  residentInvitationsCreated ResidentInvitation[] @relation("ResidentInvitationCreator")
+  residentInvitationsOptInConfirmed ResidentInvitation[] @relation("ResidentInvitationOptInConfirmer")
+  notificationConsents ResidentNotificationConsent[]
 }
 
 model Person {
@@ -98,6 +117,8 @@ model Person {
   updatedAt        DateTime   @updatedAt
   residenceId      Int        @default(1)
   residence       Residence  @relation(fields: [residenceId], references: [id])
+  user             User?
+  residentInvitations ResidentInvitation[]
   accessLogs       AccessLog[]
   vehicles         Vehicle[]
   documentType     DocumentType? @relation(fields: [documentTypeId], references: [id])
@@ -193,6 +214,41 @@ model SystemSetting {
   residence Residence @relation(fields: [residenceId], references: [id])
   updatedAt DateTime @updatedAt
   @@unique([residenceId, key])
+}
+
+model ResidentInvitation {
+  id          Int       @id @default(autoincrement())
+  tokenHash   String    @unique
+  otpAttempts Int       @default(0)
+  recipientPhone String?
+  whatsappOptInMessageId String? @unique
+  personId    Int
+  residenceId Int
+  createdById Int?
+  whatsappOptInAt DateTime?
+  whatsappOptInById Int?
+  createdAt   DateTime  @default(now())
+  expiresAt   DateTime
+  consumedAt  DateTime?
+  revokedAt   DateTime?
+  person      Person    @relation(fields: [personId], references: [id])
+  residence   Residence @relation(fields: [residenceId], references: [id])
+  createdBy   User?     @relation("ResidentInvitationCreator", fields: [createdById], references: [id])
+  whatsappOptInConfirmedBy User? @relation("ResidentInvitationOptInConfirmer", fields: [whatsappOptInById], references: [id])
+
+  @@index([personId, createdAt])
+  @@index([recipientPhone, expiresAt])
+}
+
+model ResidentNotificationConsent {
+  id        Int                                @id @default(autoincrement())
+  status    ResidentNotificationConsentStatus
+  source    ResidentNotificationConsentSource
+  createdAt DateTime                           @default(now())
+  userId    Int
+  user      User                               @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
 }
 
 model Delivery {

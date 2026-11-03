@@ -5,12 +5,13 @@ import QRCode from 'qrcode';
 import { FormEvent, StrictMode, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import './access-search.css';
+import './resident-portal.css';
 import './styles.css';
 
 type BuildingSectionType = 'TORRE' | 'INTERIOR';
 type PersonLocation = { buildingSectionType: BuildingSectionType | null; buildingSectionNumber: string | null; apartmentNumber: string };
 type Log = { id: number; accessType: 'ENTRADA' | 'SALIDA'; occurredAt: string; person: { id: number; fullName: string; type: string; documentNumber?: string | null; phone?: string | null; photoUrl?: string | null } & PersonLocation; vehicle?: { id: number; plate: string; type: string; brand?: string | null; model?: string | null; color?: string | null; photoUrl?: string | null } | null };
-type Person = { id: number; accessCode: string; type: 'RESIDENTE' | 'VISITANTE'; fullName: string; documentNumber?: string | null; phone?: string | null; documentType?: { code: string; name: string } | null; photoUrl?: string | null } & PersonLocation;
+type Person = { id: number; accessCode: string; type: 'RESIDENTE' | 'VISITANTE'; fullName: string; documentNumber?: string | null; phone?: string | null; hasPortalAccount?: boolean; hasPendingInvitation?: boolean; documentType?: { code: string; name: string } | null; photoUrl?: string | null } & PersonLocation;
 type DocumentType = { id: number; code: string; name: string };
 type Vehicle = { id: number; accessCode: string; personId: number; plate: string; type: 'AUTOMOVIL' | 'MOTOCICLETA' | 'BICICLETA' | 'OTRO'; brand?: string | null; model?: string | null; color?: string | null; photoUrl?: string | null; person: { fullName: string; type: string } & PersonLocation };
 type Residence = { id: number; name: string; code: string; hasLogo: boolean; logo?: string | null; userRole?: string };
@@ -55,7 +56,7 @@ function formatPersonLocation(person: PersonLocation) {
 function normalizePersonSearch(value: string) {
   return value.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
-const api = 'http://localhost:4000';
+const api = import.meta.env.VITE_API_URL || 'http://localhost:4000';
 const getToken = () => localStorage.getItem('token') ?? '';
 const sessionExpiredEvent = 'resi-control:session-expired';
 const nativeFetch = window.fetch.bind(window);
@@ -98,6 +99,14 @@ function formatColombianPhone(value: string) {
   if (!national) return '';
   const groups = [national.slice(0, 3), national.slice(3, 6), national.slice(6, 10)].filter(Boolean);
   return `(+57) ${groups.join(' ')}`;
+}
+
+function formatWhatsAppBusinessPhone(value: string) {
+  const digits = value.replace(/\D/g, '');
+  if (!digits) return '';
+  if (digits.startsWith('57') && digits.length === 12) return formatColombianPhone(digits);
+  if (digits.length === 10 && digits.startsWith('3')) return formatColombianPhone(digits);
+  return `+${digits}`;
 }
 
 async function deletePerson(id: number) {
@@ -158,6 +167,155 @@ function validatePhoto(file: File) {
   return '';
 }
 
+type ResidentProfile = {
+  fullName: string;
+  buildingSectionType: BuildingSectionType | null;
+  buildingSectionNumber: string | null;
+  apartmentNumber: string;
+  residenceName: string;
+  whatsappNotificationsEnabled: boolean;
+};
+
+type ResidentDelivery = Pick<Delivery, 'id' | 'type' | 'status' | 'courier' | 'description' | 'trackingCode' | 'receivedAt' | 'deliveredAt' | 'deliveredToName'>;
+
+function ResidentPortal() {
+  const [profile, setProfile] = useState<ResidentProfile | null>(null);
+  const [deliveries, setDeliveries] = useState<ResidentDelivery[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [savingConsent, setSavingConsent] = useState(false);
+
+  async function loadPortal() {
+    setLoading(true);
+    setError('');
+    try {
+      const headers = { Authorization: `Bearer ${getToken()}` };
+      const [profileResponse, deliveriesResponse] = await Promise.all([
+        apiFetch(`${api}/api/resident/profile`, { headers }),
+        apiFetch(`${api}/api/resident/deliveries`, { headers }),
+      ]);
+      const profileData = await profileResponse.json().catch(() => null);
+      const deliveriesData = await deliveriesResponse.json().catch(() => null);
+      if (!profileResponse.ok) throw new Error(profileData?.message ?? 'No se pudo consultar el perfil.');
+      if (!deliveriesResponse.ok) throw new Error(deliveriesData?.message ?? 'No se pudieron consultar tus encomiendas.');
+      setProfile(profileData);
+      setDeliveries(deliveriesData);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'No se pudo cargar el portal.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void loadPortal();
+  }, []);
+
+  function logout() {
+    localStorage.removeItem('token');
+    localStorage.removeItem('userRole');
+    window.location.reload();
+  }
+
+  async function updateConsent(consented: boolean) {
+    setSavingConsent(true);
+    setError('');
+    try {
+      const response = await apiFetch(`${api}/api/resident/notifications/consent`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + localStorage.getItem('token') },
+        body: JSON.stringify({ consented }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.message ?? 'No se pudo actualizar tu preferencia.');
+      setProfile((current) => current ? { ...current, whatsappNotificationsEnabled: data.whatsappNotificationsEnabled } : current);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'No se pudo actualizar tu preferencia.');
+    } finally {
+      setSavingConsent(false);
+    }
+  }
+
+  return <main className="resident-portal">
+    <header className="resident-header">
+      <div><span className="eyebrow">PORTAL RESIDENTE</span><h1>{profile?.residenceName ?? 'Resi Control'}</h1>
+        {profile && <p>{profile.fullName} · {formatPersonLocation(profile)}</p>}
+      </div>
+      <div className="resident-actions"><button className="secondary" type="button" onClick={() => void loadPortal()} disabled={loading}>Actualizar</button><button type="button" onClick={logout}>Cerrar sesión</button></div>
+    </header>
+    <section className="resident-panel resident-consent-panel">
+      <div><span className="eyebrow">NOTIFICACIONES</span><h2>Avisos por WhatsApp</h2>
+        <p>Tu decisión se puede cambiar en cualquier momento. Activar esta opción no envía mensajes ahora; el envío requiere que la residencia configure WhatsApp Business.</p>
+        <strong>{profile?.whatsappNotificationsEnabled ? 'Has aceptado recibir avisos.' : 'No has aceptado recibir avisos.'}</strong>
+      </div>
+      <button type="button" className={profile?.whatsappNotificationsEnabled ? 'secondary' : ''} disabled={!profile || savingConsent} onClick={() => void updateConsent(!profile?.whatsappNotificationsEnabled)}>
+        {savingConsent ? 'Guardando...' : profile?.whatsappNotificationsEnabled ? 'Retirar consentimiento' : 'Aceptar avisos'}
+      </button>
+    </section>
+    <section className="resident-panel">
+      <div className="panel-heading"><div><span className="eyebrow">MIS ENCOMIENDAS</span><h2>Historial de entregas</h2></div></div>
+      {error && <div className="notice">{error}</div>}
+      {loading ? <div className="empty">Cargando tus encomiendas…</div>
+        : deliveries.length ? <div className="resident-deliveries">{deliveries.map((delivery) => <article className="resident-delivery" key={delivery.id}>
+          <div className="resident-delivery-heading"><strong>{deliveryTypeLabels[delivery.type]}</strong><span className={`resident-status resident-status-${delivery.status.toLowerCase()}`}>{deliveryStatusLabels[delivery.status]}</span></div>
+          <p>Recibida el {new Date(delivery.receivedAt).toLocaleString('es-CO')}</p>
+          {delivery.courier && <p>Mensajería: {delivery.courier}</p>}
+          {delivery.description && <p>{delivery.description}</p>}
+          {delivery.trackingCode && <p>Guía: {delivery.trackingCode}</p>}
+          {delivery.deliveredAt && <p>Entregada el {new Date(delivery.deliveredAt).toLocaleString('es-CO')}{delivery.deliveredToName ? ` · Recibió: ${delivery.deliveredToName}` : ''}</p>}
+        </article>)}</div>
+          : <div className="empty">Todavía no tienes encomiendas registradas.</div>}
+    </section>
+  </main>;
+}
+
+function ResidentActivation({ invitationToken = '' }: { invitationToken?: string }) {
+  const [code, setCode] = useState('');
+  const [phone, setPhone] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [consentToWhatsapp, setConsentToWhatsapp] = useState(false);
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  async function activate(event: FormEvent) {
+    event.preventDefault();
+    setSaving(true);
+    setError('');
+    try {
+      const response = await nativeFetch(`${api}/api/resident/activate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...(invitationToken ? { token: invitationToken } : { code, phone }), email, password, consentToWhatsapp }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.message ?? 'No se pudo activar la cuenta.');
+      localStorage.setItem('token', data.token);
+      localStorage.setItem('userRole', data.user.role);
+      window.history.replaceState(null, '', window.location.pathname);
+      window.location.reload();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'No se pudo activar la cuenta.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return <main className="login-page"><form className="login-card" onSubmit={activate}>
+    <span className="eyebrow">PORTAL RESIDENTE</span><h1>Activa tu cuenta</h1>
+    <p>{invitationToken ? 'Crea tus credenciales para ingresar al portal de residentes.' : 'Ingresa el código de seis dígitos y el celular que lo recibió.'}</p>
+    {!invitationToken && <>
+      <label>Código de activación<input required inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, '').slice(0, 6))} /></label>
+      <label>Celular que recibió el código<input required type="tel" autoComplete="tel" maxLength={30} value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="+57 300 123 4567" /></label>
+    </>}
+    <label>Correo<input required type="email" autoComplete="email" maxLength={254} value={email} onChange={(event) => setEmail(event.target.value)} /></label>
+    <label>Contraseña<input required type="password" autoComplete="new-password" minLength={12} maxLength={128} value={password} onChange={(event) => setPassword(event.target.value)} /><small>Usa al menos 12 caracteres.</small></label>
+    <label className="resident-consent-choice"><input type="checkbox" checked={consentToWhatsapp} onChange={(event) => setConsentToWhatsapp(event.target.checked)} />Acepto recibir futuros avisos de encomiendas por WhatsApp. Puedo retirar este consentimiento desde mi portal.</label>
+    <p>Este consentimiento es independiente de la autorización previa para enviarte este código. Si no marcas la casilla, la cuenta se activará sin aceptar avisos futuros.</p>
+    {error && <div className="notice">{error}</div>}<button disabled={saving} type="submit">{saving ? 'Activando...' : 'Crear cuenta e ingresar'}</button>
+  </form></main>;
+}
+
 function App() {
   const [authenticated, setAuthenticated] = useState(Boolean(localStorage.getItem('token')));
   const [userRole, setUserRole] = useState(localStorage.getItem('userRole') ?? '');
@@ -213,6 +371,7 @@ function App() {
   const [accessType, setAccessType] = useState<'ENTRADA' | 'SALIDA'>('ENTRADA');
   const [saving, setSaving] = useState(false);
   const [irregularMode, setIrregularMode] = useState<'BLOCK' | 'SUPERVISOR'>('BLOCK');
+  const [whatsappPhone, setWhatsappPhone] = useState('');
   const [showSettings, setShowSettings] = useState(false);
   const [supervisorEmail, setSupervisorEmail] = useState('');
   const [supervisorPassword, setSupervisorPassword] = useState('');
@@ -233,7 +392,7 @@ function App() {
   const [removeResidenceLogo, setRemoveResidenceLogo] = useState(false);
   const [activeView, setActiveView] = useState<'movements' | 'people' | 'vehicles' | 'deliveries' | 'settings'>('movements');
   const [deliveries, setDeliveries] = useState<Delivery[]>([]);
-  const [deliveryFilter, setDeliveryFilter] = useState<'PENDIENTE' | 'TODAS'>('PENDIENTE');
+  const [deliveryFilter, setDeliveryFilter] = useState<'PENDIENTE' | 'DEVUELTA' | 'TODAS'>('PENDIENTE');
   const [showDeliveryForm, setShowDeliveryForm] = useState(false);
   const [deliveryPersonId, setDeliveryPersonId] = useState('');
   const [deliveryType, setDeliveryType] = useState<DeliveryKind>('PAQUETE');
@@ -248,6 +407,7 @@ function App() {
   const [selectedVehiclePhoto, setSelectedVehiclePhoto] = useState('');
   const [selectedPerson, setSelectedPerson] = useState<Person | null>(null);
   const [selectedVehicle, setSelectedVehicle] = useState<Vehicle | null>(null);
+  const [invitingPersonId, setInvitingPersonId] = useState<number | null>(null);
 
   const token = () => localStorage.getItem('token') ?? '';
 
@@ -263,6 +423,27 @@ function App() {
     const response = await apiFetch(`${api}/api/people`, { headers: { Authorization: `Bearer ${getToken()}` } });
     if (!response.ok) throw new Error('No se pudieron consultar las personas.');
     setPeople(await response.json());
+  }
+
+  async function revokeResidentInvitation(person: Person) {
+    setInvitingPersonId(person.id);
+    setError('');
+    setNotice('');
+    try {
+      const response = await apiFetch(`${api}/api/resident-invitations/${person.id}`, {
+        method: 'DELETE',
+        headers: { Authorization: 'Bearer ' + token() },
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.message ?? 'No se pudo revocar la invitación.');
+      setSelectedPerson({ ...person, hasPendingInvitation: false });
+      setPeople((current) => current.map((item) => item.id === person.id ? { ...item, hasPendingInvitation: false } : item));
+      setNotice('Invitación revocada.');
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'No se pudo revocar la invitación.');
+    } finally {
+      setInvitingPersonId(null);
+    }
   }
 
   async function loadDocumentTypes() {
@@ -292,6 +473,10 @@ function App() {
     const captureResponse = await apiFetch(`${api}/api/settings/access-capture`, { headers: { Authorization: `Bearer ${token()}` } });
     if (!captureResponse.ok) throw new Error(`No se pudo consultar el modo de captura (HTTP ${captureResponse.status}).`);
     setAccessCaptureMode((await captureResponse.json()).mode);
+    const whatsappResponse = await apiFetch(`${api}/api/settings/whatsapp`, { headers: { Authorization: 'Bearer ' + token() } });
+    if (!whatsappResponse.ok) throw new Error(`No se pudo consultar el número de WhatsApp (HTTP ${whatsappResponse.status}).`);
+    const whatsappData = await whatsappResponse.json();
+    setWhatsappPhone(formatWhatsAppBusinessPhone(whatsappData.phone ?? ''));
   }
 
   async function resolveScan(value: string) {
@@ -449,11 +634,11 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (!authenticated) return;
+    if (!authenticated || userRole === 'RESIDENTE') return;
     Promise.all([loadDashboard(), loadPeople(), loadDocumentTypes(), loadVehicles(), loadDeliveries(), loadResidence()])
       .catch((reason: Error) => setError(reason.message));
     loadSettings().catch((reason: Error) => setError(reason.message));
-  }, [authenticated]);
+  }, [authenticated, userRole]);
 
   useEffect(() => () => {
     scannerControlsRef.current?.stop();
@@ -799,6 +984,9 @@ function App() {
     normalizePersonSearch(`${vehicle.plate} ${vehicle.person.fullName} ${formatPersonLocation(vehicle.person)}`)
       .includes(normalizePersonSearch(vehicleSearch.trim())),
   );
+  const activationRequestLink = whatsappPhone
+    ? `https://wa.me/${whatsappPhone.replace(/\D/g, '')}?text=${encodeURIComponent('ACTIVAR PORTAL')}`
+    : '';
 
   async function createDelivery(event: FormEvent) {
     event.preventDefault();
@@ -933,6 +1121,24 @@ function App() {
     finally { setSaving(false); }
   }
 
+  async function saveWhatsAppPhone(event: FormEvent) {
+    event.preventDefault();
+    setSaving(true); setError(''); setNotice('');
+    try {
+      const response = await apiFetch(`${api}/api/settings/whatsapp`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token() },
+        body: JSON.stringify({ phone: whatsappPhone }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.message ?? 'No se pudo guardar el número de WhatsApp.');
+      setWhatsappPhone(formatWhatsAppBusinessPhone(data.phone ?? ''));
+      setNotice(data.phone ? 'Número de WhatsApp guardado correctamente.' : 'Número de WhatsApp eliminado de la configuración.');
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'No se pudo guardar el número de WhatsApp.');
+    } finally { setSaving(false); }
+  }
+
   async function saveResidence(event: FormEvent) {
     event.preventDefault();
     setSaving(true); setError(''); setNotice('');
@@ -953,12 +1159,19 @@ function App() {
     finally { setSaving(false); }
   }
 
+  const invitationToken = new URLSearchParams(window.location.hash.slice(1)).get('invite') ?? '';
+  if (invitationToken) return <ResidentActivation invitationToken={invitationToken} />;
+  const isResidentActivation = new URLSearchParams(window.location.search).get('activar') === '1';
+  if (isResidentActivation) return <ResidentActivation />;
   if (!authenticated) return <main className="login-page"><form className="login-card" onSubmit={login}>
-    <span className="eyebrow">RESI CONTROL</span><h1>Iniciar sesión</h1><p>Ingresa para administrar el acceso residencial.</p>
+    <span className="eyebrow">RESI CONTROL</span><h1>Iniciar sesión</h1><p>Ingresa a tu portal o al sistema de administración residencial.</p>
     <label>Correo<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label>
     <label>Contraseña<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
     {loginError && <div className="notice">{loginError}</div>}<button type="submit">Ingresar</button>
+    <p><a href="?activar=1">Tengo un código de activación</a></p>
   </form></main>;
+
+  if (userRole === 'RESIDENTE') return <ResidentPortal />;
 
   return <main>
     <header><div className="brand"><div className="residence-logo">{residenceLogoUrl ? <img src={residenceLogoUrl} alt={`Logo de ${residence?.name ?? 'la residencia'}`} /> : <span>RC</span>}</div><div><span className="eyebrow">RESI CONTROL</span><h1>{residence?.name ?? 'Control de acceso'}</h1><p>Supervisión del conjunto residencial en tiempo real.</p></div></div><div className="actions"><button className={activeView === 'movements' ? 'active-nav' : ''} onClick={() => { setActiveView('movements'); setShowAccessForm(false); }}>Movimientos</button><button className={activeView === 'people' ? 'active-nav' : ''} onClick={() => { setActiveView('people'); setShowAccessForm(false); }}>Personas</button><button className={activeView === 'vehicles' ? 'active-nav' : ''} onClick={() => { setActiveView('vehicles'); setShowAccessForm(false); }}>Vehículos</button><button className={activeView === 'deliveries' ? 'active-nav' : ''} onClick={() => { setActiveView('deliveries'); setShowAccessForm(false); }}>Encomiendas{totals.pendingDeliveries ? ` · ${totals.pendingDeliveries}` : ''}</button>{(userRole === 'ADMINISTRADOR' || userRole === 'SUPER_ADMINISTRADOR') && <button className={activeView === 'settings' ? 'active-nav' : ''} onClick={() => { setActiveView('settings'); setShowSettings(true); }}>Configuración</button>}</div></header>
@@ -995,6 +1208,13 @@ function App() {
       <small className="form-full">Formatos permitidos: JPG, PNG o WebP. Tamaño máximo: 2 MB.</small>
       <button disabled={saving} type="submit">{saving ? 'Guardando...' : 'Guardar residencia'}</button>
     </form></section>}
+    {activeView === 'settings' && showSettings && (userRole === 'ADMINISTRADOR' || userRole === 'SUPER_ADMINISTRADOR') && <section className="form-panel"><div className="panel-heading"><div><span className="eyebrow">NOTIFICACIONES</span><h2>Número de WhatsApp</h2></div></div>
+      <form className="form-grid" onSubmit={saveWhatsAppPhone}>
+        <label>Número de WhatsApp Business<input type="tel" inputMode="tel" autoComplete="tel" maxLength={30} placeholder="+57 300 123 4567" value={whatsappPhone} onChange={(event) => setWhatsappPhone(event.target.value)} /></label>
+        <small className="form-full">Ingresa el número que usan los residentes para iniciar el chat (puede ser el número de prueba de Meta). Se guardará en formato internacional. Configurarlo aquí no conecta con Meta; también debes publicar y configurar el webhook.</small>
+        <button disabled={saving} type="submit">{saving ? 'Guardando...' : 'Guardar número de WhatsApp'}</button>
+      </form>
+    </section>}
     {activeView === 'people' && showPersonForm && <div className="modal-backdrop" onClick={() => { setShowPersonForm(false); setEditingPersonId(null); }}><section className="form-panel modal-panel" onClick={(event) => event.stopPropagation()}><div className="panel-heading"><div><span className="eyebrow">{editingPersonId ? 'EDITAR REGISTRO' : 'NUEVO REGISTRO'}</span><h2>{editingPersonId ? 'Editar persona' : 'Registrar persona'}</h2></div><button type="button" className="secondary" onClick={() => { setShowPersonForm(false); setEditingPersonId(null); }}>Cerrar</button></div><form className="form-grid" onSubmit={createPerson}>
       <label>Tipo<select value={personType} onChange={(event) => setPersonType(event.target.value as Person['type'])}><option value="RESIDENTE">Residente</option><option value="VISITANTE">Visitante</option></select></label>
       <label>Nombre completo<input required value={fullName} onChange={(event) => setFullName(event.target.value)} /></label>
@@ -1039,8 +1259,8 @@ function App() {
       <button disabled={saving} type="submit">{saving ? 'Guardando...' : 'Guardar encomienda'}</button>
     </form> : <div className="empty">Primero registra un residente o visitante.</div>}</section></div>}
     {activeView === 'deliveries' && <section className="panel vehicle-panel"><div className="panel-heading"><div><span className="eyebrow">ENCOMIENDAS</span><h2>Control de encomiendas</h2></div><div className="panel-actions"><span>{totals.pendingDeliveries} pendientes</span><button onClick={() => setShowDeliveryForm(true)}>Registrar encomienda</button></div></div>
-      <div className="delivery-filters"><button type="button" className={deliveryFilter === 'PENDIENTE' ? 'active-nav' : 'secondary'} onClick={() => setDeliveryFilter('PENDIENTE')}>Pendientes</button><button type="button" className={deliveryFilter === 'TODAS' ? 'active-nav' : 'secondary'} onClick={() => setDeliveryFilter('TODAS')}>Todas</button></div>
-      {deliveries.filter((delivery) => deliveryFilter === 'TODAS' || delivery.status === 'PENDIENTE').length ? <div className="table"><div className="row delivery-row heading"><span>Destinatario</span><span>Ubicación</span><span>Tipo</span><span>Detalle</span><span>Recibida</span><span>Estado</span><span>Acciones</span></div>{deliveries.filter((delivery) => deliveryFilter === 'TODAS' || delivery.status === 'PENDIENTE').map((delivery) => <div className="row delivery-row" key={delivery.id}><strong>{delivery.person.fullName}</strong><span>{formatPersonLocation(delivery.person)}</span><span>{deliveryTypeLabels[delivery.type]}</span><span>{delivery.description || delivery.courier || '—'}{delivery.trackingCode ? ` · ${delivery.trackingCode}` : ''}</span><span>{new Date(delivery.receivedAt).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}</span><span className={`delivery-status ${delivery.status.toLowerCase()}`}>{deliveryStatusLabels[delivery.status]}</span><div className="delivery-actions">{delivery.status === 'PENDIENTE' ? <><button type="button" className="small-button" onClick={() => { setClosingDelivery(delivery); setDeliveredToName(delivery.person.fullName); }}>Entregar</button><button type="button" className="small-button secondary" onClick={() => { if (window.confirm('¿Marcar esta encomienda como devuelta?')) updateDeliveryStatus(delivery, 'DEVUELTA'); }}>Devolver</button></> : <span className="delivery-closed">{delivery.deliveredToName ? `Recibió: ${delivery.deliveredToName}` : delivery.deliveredBy?.name ?? 'Cerrada'}</span>}</div></div>)}</div> : <div className="empty">{deliveryFilter === 'PENDIENTE' ? 'No hay encomiendas pendientes.' : 'Aún no hay encomiendas registradas.'}</div>}
+      <div className="delivery-filters"><button type="button" className={deliveryFilter === 'PENDIENTE' ? 'active-nav' : 'secondary'} onClick={() => setDeliveryFilter('PENDIENTE')}>Pendientes</button><button type="button" className={deliveryFilter === 'DEVUELTA' ? 'active-nav' : 'secondary'} onClick={() => setDeliveryFilter('DEVUELTA')}>Devueltas</button><button type="button" className={deliveryFilter === 'TODAS' ? 'active-nav' : 'secondary'} onClick={() => setDeliveryFilter('TODAS')}>Todas</button></div>
+      {deliveries.filter((delivery) => deliveryFilter === 'TODAS' || delivery.status === deliveryFilter).length ? <div className="table"><div className="row delivery-row heading"><span>Destinatario</span><span>Ubicación</span><span>Tipo</span><span>Detalle</span><span>Recibida</span><span>Estado</span><span>Acciones</span></div>{deliveries.filter((delivery) => deliveryFilter === 'TODAS' || delivery.status === deliveryFilter).map((delivery) => <div className="row delivery-row" key={delivery.id}><strong>{delivery.person.fullName}</strong><span>{formatPersonLocation(delivery.person)}</span><span>{deliveryTypeLabels[delivery.type]}</span><span>{delivery.description || delivery.courier || '—'}{delivery.trackingCode ? ` · ${delivery.trackingCode}` : ''}</span><span>{new Date(delivery.receivedAt).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}</span><span className={`delivery-status ${delivery.status.toLowerCase()}`}>{deliveryStatusLabels[delivery.status]}</span><div className="delivery-actions">{delivery.status === 'PENDIENTE' ? <><button type="button" className="small-button" onClick={() => { setClosingDelivery(delivery); setDeliveredToName(delivery.person.fullName); }}>Entregar</button><button type="button" className="small-button secondary" onClick={() => { if (window.confirm('¿Marcar esta encomienda como devuelta?')) updateDeliveryStatus(delivery, 'DEVUELTA'); }}>Devolver</button></> : <span className="delivery-closed">{delivery.deliveredToName ? `Recibió: ${delivery.deliveredToName}` : delivery.deliveredBy?.name ?? 'Cerrada'}</span>}</div></div>)}</div> : <div className="empty">{deliveryFilter === 'PENDIENTE' ? 'No hay encomiendas pendientes.' : deliveryFilter === 'DEVUELTA' ? 'No hay encomiendas devueltas.' : 'Aún no hay encomiendas registradas.'}</div>}
     </section>}
     {closingDelivery && <div className="modal-backdrop" onClick={() => setClosingDelivery(null)}><section className="form-panel modal-panel" onClick={(event) => event.stopPropagation()}><div className="panel-heading"><div><span className="eyebrow">ENTREGA DE ENCOMIENDA</span><h2>{closingDelivery.person.fullName} · {formatPersonLocation(closingDelivery.person)}</h2></div><button type="button" className="secondary" onClick={() => setClosingDelivery(null)}>Cerrar</button></div><form className="form-grid" onSubmit={deliverEncomienda}>
       <p className="form-full">{deliveryTypeLabels[closingDelivery.type]}{closingDelivery.description ? ` · ${closingDelivery.description}` : ''}{closingDelivery.courier ? ` · ${closingDelivery.courier}` : ''}</p>
@@ -1055,7 +1275,38 @@ function App() {
       <div className="detail-grid"><div className="detail-card"><h3>Persona</h3>{selectedPersonPhoto ? <img className="detail-photo" src={selectedPersonPhoto} alt={`Foto de ${selectedLog.person.fullName}`} /> : <div className="detail-photo-placeholder">Sin foto</div>}<p><strong>{selectedLog.person.fullName}</strong></p><p>{selectedLog.person.type === 'VISITANTE' ? 'Visitante' : 'Residente'} · {formatPersonLocation(selectedLog.person)}</p><p>Documento: {selectedLog.person.documentNumber || 'No registrado'}</p><p>Teléfono: {selectedLog.person.phone || 'No registrado'}</p></div>
         <div className="detail-card"><h3>Vehículo</h3>{selectedLog.vehicle ? <><div className="detail-photo-wrap">{selectedVehiclePhoto ? <img className="detail-photo" src={selectedVehiclePhoto} alt={`Foto del vehículo ${selectedLog.vehicle.plate}`} /> : <div className="detail-photo-placeholder">Sin foto</div>}</div><p><strong>{selectedLog.vehicle.plate}</strong></p><p>Tipo: {selectedLog.vehicle.type === 'AUTOMOVIL' ? 'Automóvil' : selectedLog.vehicle.type === 'MOTOCICLETA' ? 'Motocicleta' : selectedLog.vehicle.type === 'BICICLETA' ? 'Bicicleta' : 'Otro'}</p><p>Marca: {selectedLog.vehicle.brand || 'No registrada'}</p><p>Modelo: {selectedLog.vehicle.model || 'No registrado'}</p><p>Color: {selectedLog.vehicle.color || 'No registrado'}</p></> : <div className="empty">Este movimiento no está asociado a un vehículo.</div>}</div></div>
     </section></div>}
-    {selectedPerson && <div className="detail-backdrop" onClick={() => setSelectedPerson(null)}><section className="movement-detail" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}><div className="panel-heading"><div><span className="eyebrow">DETALLE DE PERSONA</span><h2>{selectedPerson.fullName}</h2></div><button className="secondary" onClick={() => setSelectedPerson(null)}>Cerrar</button></div><div className="detail-grid"><div className="detail-card">{selectedPerson.photoUrl ? <img className="detail-photo" src={selectedPerson.photoUrl} alt={`Foto de ${selectedPerson.fullName}`} /> : <div className="detail-photo-placeholder">Sin foto</div>}<p><strong>{selectedPerson.type === 'RESIDENTE' ? 'Residente' : 'Visitante'}</strong></p><p>Sector: {formatBuildingSection(selectedPerson)}</p><p>Apartamento: {selectedPerson.apartmentNumber}</p><p>Documento: {selectedPerson.documentType?.code || 'No registrado'} {selectedPerson.documentNumber || ''}</p><p>Teléfono: {selectedPerson.phone || 'No registrado'}</p></div><div className="detail-card"><h3>Acciones</h3><button onClick={() => { setSelectedPerson(null); editPerson(selectedPerson); }}>Editar persona</button><label className="file-button detail-file-button">Subir o reemplazar foto<input type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" onChange={async (event) => { const file = event.target.files?.[0] ?? null; await uploadPhoto('people', selectedPerson.id, file); if (file) setSelectedPerson({ ...selectedPerson, photoUrl: URL.createObjectURL(file) }); }} /></label>{selectedPerson.photoUrl && <button className="small-button danger-button" onClick={async () => { await deletePersonPhoto(selectedPerson.id); setSelectedPerson({ ...selectedPerson, photoUrl: null }); }}>Eliminar foto</button>}<AccessCodeCard code={selectedPerson.accessCode} label="Código de la persona" /></div></div></section></div>}
+    {selectedPerson && <div className="detail-backdrop" onClick={() => setSelectedPerson(null)}>
+      <section className="movement-detail" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
+        <div className="panel-heading"><div><span className="eyebrow">DETALLE DE PERSONA</span><h2>{selectedPerson.fullName}</h2></div><button className="secondary" onClick={() => setSelectedPerson(null)}>Cerrar</button></div>
+        <div className="detail-grid">
+          <div className="detail-card">
+            {selectedPerson.photoUrl ? <img className="detail-photo" src={selectedPerson.photoUrl} alt={`Foto de ${selectedPerson.fullName}`} /> : <div className="detail-photo-placeholder">Sin foto</div>}
+            <p><strong>{selectedPerson.type === 'RESIDENTE' ? 'Residente' : 'Visitante'}</strong></p>
+            <p>Sector: {formatBuildingSection(selectedPerson)}</p><p>Apartamento: {selectedPerson.apartmentNumber}</p>
+            <p>Documento: {selectedPerson.documentType?.code || 'No registrado'} {selectedPerson.documentNumber || ''}</p><p>Teléfono: {selectedPerson.phone || 'No registrado'}</p>
+          </div>
+          <div className="detail-card">
+            <h3>Acciones</h3><button onClick={() => { setSelectedPerson(null); editPerson(selectedPerson); }}>Editar persona</button>
+            {selectedPerson.type === 'RESIDENTE' && <>
+              <p>{selectedPerson.hasPortalAccount ? 'Cuenta residente activa.' : 'Sin cuenta residente.'}</p>
+              {!selectedPerson.hasPortalAccount && <>
+                {activationRequestLink
+                  ? <><p>Comparte este enlace con el residente. Debe abrirlo desde su celular y enviar el mensaje para solicitar su activación:</p>
+                    <input aria-label="Enlace para solicitar activación por WhatsApp" readOnly value={activationRequestLink} onFocus={(event) => event.currentTarget.select()} />
+                    <button type="button" className="secondary" onClick={() => { void navigator.clipboard.writeText(activationRequestLink).then(() => setNotice('Enlace de solicitud copiado.')).catch(() => setError('No se pudo copiar el enlace; selecciónalo y cópialo manualmente.')); }}>Copiar enlace de solicitud</button>
+                  </>
+                  : <small>Configura el número de WhatsApp Business de la residencia para generar el enlace de solicitud.</small>}
+              </>}
+              {selectedPerson.hasPendingInvitation && <button className="secondary" disabled={Boolean(invitingPersonId)} onClick={() => void revokeResidentInvitation(selectedPerson)}>{invitingPersonId === selectedPerson.id ? 'Revocando...' : 'Revocar invitación pendiente'}</button>}
+              {!selectedPerson.phone && <small>Registra el celular del residente antes de que solicite la activación.</small>}
+            </>}
+            <label className="file-button detail-file-button">Subir o reemplazar foto<input type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" onChange={async (event) => { const file = event.target.files?.[0] ?? null; await uploadPhoto('people', selectedPerson.id, file); if (file) setSelectedPerson({ ...selectedPerson, photoUrl: URL.createObjectURL(file) }); }} /></label>
+            {selectedPerson.photoUrl && <button className="small-button danger-button" onClick={async () => { await deletePersonPhoto(selectedPerson.id); setSelectedPerson({ ...selectedPerson, photoUrl: null }); }}>Eliminar foto</button>}
+            <AccessCodeCard code={selectedPerson.accessCode} label="Código de la persona" />
+          </div>
+        </div>
+      </section>
+    </div>}
     {selectedVehicle && <div className="detail-backdrop" onClick={() => setSelectedVehicle(null)}><section className="movement-detail" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}><div className="panel-heading"><div><span className="eyebrow">DETALLE DE VEHÍCULO</span><h2>{selectedVehicle.plate}</h2></div><button className="secondary" onClick={() => setSelectedVehicle(null)}>Cerrar</button></div><div className="detail-grid"><div className="detail-card">{selectedVehicle.photoUrl ? <img className="detail-photo" src={selectedVehicle.photoUrl} alt={`Foto del vehículo ${selectedVehicle.plate}`} /> : <div className="detail-photo-placeholder">Sin foto</div>}<p><strong>{selectedVehicle.type === 'AUTOMOVIL' ? 'Automóvil' : selectedVehicle.type === 'MOTOCICLETA' ? 'Motocicleta' : selectedVehicle.type === 'BICICLETA' ? 'Bicicleta' : 'Otro'}</strong></p><p>Marca: {selectedVehicle.brand || 'No registrada'}</p><p>Modelo: {selectedVehicle.model || 'No registrado'}</p><p>Color: {selectedVehicle.color || 'No registrado'}</p><p>Propietario: {selectedVehicle.person.fullName}</p><p>Ubicación: {formatPersonLocation(selectedVehicle.person)}</p></div><div className="detail-card"><h3>Acciones</h3><button onClick={() => { setSelectedVehicle(null); editVehicle(selectedVehicle); }}>Editar vehículo</button><label className="file-button detail-file-button">Subir o reemplazar foto<input type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" onChange={async (event) => { const file = event.target.files?.[0] ?? null; await uploadPhoto('vehicles', selectedVehicle.id, file); if (file) setSelectedVehicle({ ...selectedVehicle, photoUrl: URL.createObjectURL(file) }); }} /></label>{selectedVehicle.photoUrl && <button className="small-button danger-button" onClick={async () => { await deleteVehiclePhoto(selectedVehicle.id); setSelectedVehicle({ ...selectedVehicle, photoUrl: null }); }}>Eliminar foto</button>}<AccessCodeCard code={selectedVehicle.accessCode} label="Código del vehículo" /></div></div></section></div>}
   </main>;
 }
