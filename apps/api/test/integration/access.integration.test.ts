@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { createHmac, randomUUID } from 'node:crypto';
+import { createHash, createHmac, randomUUID } from 'node:crypto';
 import { AccessType, BuildingSectionType, DeliveryStatus, DeliveryType, PersonType, PrismaClient, UserRole } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
@@ -14,9 +14,17 @@ const jwtSecret = 'integration-tests-only-secret';
 const prisma = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
 const app = createApp(prisma, jwtSecret);
 const sentInvitationMessages: { phone: string; code: string }[] = [];
+const sentWhatsAppTextMessages: { phone: string; text: string }[] = [];
 const invitationApp = createApp(prisma, jwtSecret, {
   residentPortalUrl: 'https://portal.example.test',
   sendResidentInvitation: async (message) => { sentInvitationMessages.push(message); },
+});
+const webhookApp = createApp(prisma, jwtSecret, {
+  residentPortalUrl: 'https://portal.example.test',
+  whatsappWebhookVerifyToken: 'webhook-verify-token',
+  whatsappAppSecret: 'webhook-app-secret',
+  whatsappPhoneNumberId: '123456789',
+  sendWhatsAppText: async (message) => { sentWhatsAppTextMessages.push(message); },
 });
 const authHeader = 'Author' + 'ization';
 const bearerToken = () => 'Bear' + 'er ' + guardToken;
@@ -361,6 +369,103 @@ describe('POST /api/access', () => {
     });
     expect(response.body.documentNumber).toBeUndefined();
     expect(response.body.phone).toBeUndefined();
+  });
+
+  it('valida el webhook de Meta y envía un enlace solo cuando un residente inicia la solicitud', async () => {
+    const person = await prisma.person.create({
+      data: {
+        type: PersonType.RESIDENTE,
+        fullName: 'Solicitud entrante de WhatsApp',
+        buildingSectionType: BuildingSectionType.TORRE,
+        buildingSectionNumber: '8',
+        apartmentNumber: '801',
+        phone: '3005556682',
+        residenceId,
+      },
+    });
+    await prisma.systemSetting.upsert({
+      where: { residenceId_key: { residenceId, key: 'whatsapp_phone' } },
+      update: { value: '+573001234567' },
+      create: { residenceId, key: 'whatsapp_phone', value: '+573001234567' },
+    });
+
+    const handshake = await request(webhookApp)
+      .get('/api/webhooks/whatsapp')
+      .query({ 'hub.mode': 'subscribe', 'hub.verify_token': 'webhook-verify-token', 'hub.challenge': 'challenge-123' });
+    expect(handshake.status).toBe(200);
+    expect(handshake.text).toBe('challenge-123');
+
+    const payload = {
+      object: 'whatsapp_business_account',
+      entry: [{
+        changes: [{
+          field: 'messages',
+          value: {
+            messaging_product: 'whatsapp',
+            metadata: { display_phone_number: '573001234567', phone_number_id: '123456789' },
+            messages: [{
+              from: '573005556682',
+              id: `wamid.activation-${suffix}`,
+              timestamp: String(Math.floor(Date.now() / 1000)),
+              type: 'text',
+              text: { body: 'ACTIVAR PORTAL' },
+            }],
+          },
+        }],
+      }],
+    };
+    const rawPayload = JSON.stringify(payload);
+    const signature = `sha256=${createHmac('sha256', 'webhook-app-secret').update(rawPayload).digest('hex')}`;
+    const sentBefore = sentWhatsAppTextMessages.length;
+    const response = await request(webhookApp)
+      .post('/api/webhooks/whatsapp')
+      .set('X-Hub-Signature-256', signature)
+      .set('Content-Type', 'application/json')
+      .send(rawPayload);
+
+    expect(response.status).toBe(200);
+    expect(sentWhatsAppTextMessages).toHaveLength(sentBefore + 1);
+    expect(sentWhatsAppTextMessages.at(-1)).toMatchObject({ phone: '+573005556682' });
+
+    const invitation = await prisma.residentInvitation.findUnique({
+      where: { whatsappOptInMessageId: `wamid.activation-${suffix}` },
+    });
+    expect(invitation).toMatchObject({
+      personId: person.id,
+      residenceId,
+      createdById: null,
+      recipientPhone: '+573005556682',
+      whatsappOptInMessageId: `wamid.activation-${suffix}`,
+    });
+    expect(invitation?.whatsappOptInAt).toBeInstanceOf(Date);
+    expect(invitation?.expiresAt.getTime()).toBeGreaterThan(Date.now());
+    expect(invitation!.expiresAt.getTime() - Date.now()).toBeLessThanOrEqual(24 * 60 * 60 * 1000);
+
+    const linkToken = sentWhatsAppTextMessages.at(-1)!.text.match(/#invite=([a-f0-9]{64})/)?.[1];
+    expect(linkToken).toBeDefined();
+    expect(invitation?.tokenHash).toBe(createHash('sha256').update(linkToken!).digest('hex'));
+
+    const duplicate = await request(webhookApp)
+      .post('/api/webhooks/whatsapp')
+      .set('X-Hub-Signature-256', signature)
+      .set('Content-Type', 'application/json')
+      .send(rawPayload);
+    expect(duplicate.status).toBe(200);
+    expect(sentWhatsAppTextMessages).toHaveLength(sentBefore + 1);
+
+    const activated = await request(webhookApp)
+      .post('/api/resident/activate')
+      .send({ token: linkToken, email: `webhook-resident-${suffix}@example.test`, password: 'Resident-password-123!', consentToWhatsapp: false });
+    expect(activated.status).toBe(201);
+    expect(await prisma.user.findUnique({ where: { personId: person.id }, select: { id: true } })).not.toBeNull();
+  });
+
+  it('rechaza webhooks sin una firma válida', async () => {
+    const response = await request(webhookApp)
+      .post('/api/webhooks/whatsapp')
+      .set('X-Hub-Signature-256', 'sha256=invalid')
+      .send({ entry: [] });
+    expect(response.status).toBe(401);
   });
 
   it('envía una invitación de un solo uso, activa credenciales y registra cambios de consentimiento', async () => {

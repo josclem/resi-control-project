@@ -221,9 +221,10 @@ model ResidentInvitation {
   tokenHash   String    @unique
   otpAttempts Int       @default(0)
   recipientPhone String?
+  whatsappOptInMessageId String? @unique
   personId    Int
   residenceId Int
-  createdById Int
+  createdById Int?
   whatsappOptInAt DateTime?
   whatsappOptInById Int?
   createdAt   DateTime  @default(now())
@@ -232,7 +233,7 @@ model ResidentInvitation {
   revokedAt   DateTime?
   person      Person    @relation(fields: [personId], references: [id])
   residence   Residence @relation(fields: [residenceId], references: [id])
-  createdBy   User      @relation("ResidentInvitationCreator", fields: [createdById], references: [id])
+  createdBy   User?     @relation("ResidentInvitationCreator", fields: [createdById], references: [id])
   whatsappOptInConfirmedBy User? @relation("ResidentInvitationOptInConfirmer", fields: [whatsappOptInById], references: [id])
 
   @@index([personId, createdAt])

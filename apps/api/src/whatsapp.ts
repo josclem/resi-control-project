@@ -3,6 +3,8 @@ export type ResidentInvitationMessage = {
   code: string;
 };
 export type ResidentInvitationSender = (message: ResidentInvitationMessage) => Promise<void>;
+export type WhatsAppTextMessage = { phone: string; text: string };
+export type WhatsAppTextSender = (message: WhatsAppTextMessage) => Promise<void>;
 
 type WhatsAppEnvironment = Record<string, string | undefined>;
 
@@ -20,18 +22,24 @@ export class WhatsAppDeliveryError extends Error {
   }
 }
 
-function getConfiguration(environment: WhatsAppEnvironment) {
+function getApiConfiguration(environment: WhatsAppEnvironment) {
   const accessToken = environment.WHATSAPP_ACCESS_TOKEN;
   const phoneNumberId = environment.WHATSAPP_PHONE_NUMBER_ID;
-  const templateName = environment.WHATSAPP_INVITATION_TEMPLATE;
   const graphApiVersion = environment.WHATSAPP_GRAPH_API_VERSION;
-  const languageCode = environment.WHATSAPP_INVITATION_TEMPLATE_LANGUAGE ?? 'es';
 
-  if (!accessToken || !phoneNumberId || !/^\d+$/.test(phoneNumberId) || !templateName || !graphApiVersion || !/^v\d+\.\d+$/.test(graphApiVersion)) {
+  if (!accessToken || !phoneNumberId || !/^\d+$/.test(phoneNumberId) || !graphApiVersion || !/^v\d+\.\d+$/.test(graphApiVersion)) {
     throw new WhatsAppNotConfiguredError();
   }
 
-  return { accessToken, phoneNumberId, templateName, graphApiVersion, languageCode };
+  return { accessToken, phoneNumberId, graphApiVersion };
+}
+
+function getConfiguration(environment: WhatsAppEnvironment) {
+  const apiConfiguration = getApiConfiguration(environment);
+  const templateName = environment.WHATSAPP_INVITATION_TEMPLATE;
+  const languageCode = environment.WHATSAPP_INVITATION_TEMPLATE_LANGUAGE ?? 'es';
+  if (!templateName) throw new WhatsAppNotConfiguredError();
+  return { ...apiConfiguration, templateName, languageCode };
 }
 
 export function assertWhatsAppConfigured(environment: WhatsAppEnvironment = process.env) {
@@ -86,5 +94,39 @@ export function createWhatsAppInvitationSender(
     if (!response.ok) {
       throw new WhatsAppDeliveryError();
     }
+  };
+}
+
+export function createWhatsAppTextSender(
+  environment: WhatsAppEnvironment = process.env,
+  fetcher: typeof fetch = fetch,
+): WhatsAppTextSender {
+  return async ({ phone, text }): Promise<void> => {
+    const configuration = getApiConfiguration(environment);
+    let response: Response;
+    try {
+      response = await fetcher(
+        `https://graph.facebook.com/${configuration.graphApiVersion}/${configuration.phoneNumberId}/messages`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${configuration.accessToken}`,
+            'Content-Type': 'application/json',
+          },
+          signal: AbortSignal.timeout(10_000),
+          body: JSON.stringify({
+            messaging_product: 'whatsapp',
+            recipient_type: 'individual',
+            to: phone,
+            type: 'text',
+            text: { body: text },
+          }),
+        },
+      );
+    } catch {
+      throw new WhatsAppDeliveryError();
+    }
+
+    if (!response.ok) throw new WhatsAppDeliveryError();
   };
 }

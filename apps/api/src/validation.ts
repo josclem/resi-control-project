@@ -53,11 +53,19 @@ export const residentInvitationSchema = z.object({
   whatsappOptInConfirmed: z.boolean(),
 });
 export const residentActivationSchema = z.object({
-  code: z.string().regex(/^\d{6}$/),
-  phone: z.string().trim().min(1).max(30),
+  code: z.string().regex(/^\d{6}$/).optional(),
+  token: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+  phone: z.string().trim().min(1).max(30).optional(),
   email: z.string().trim().email().max(254).transform((value) => value.toLowerCase()),
   password: z.string().min(12).max(128),
   consentToWhatsapp: z.boolean(),
+}).superRefine((value, context) => {
+  if (Boolean(value.code) === Boolean(value.token)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['code'], message: 'Ingresa un código o un enlace de activación válido.' });
+  }
+  if (value.code && !value.phone) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['phone'], message: 'El número que recibió el código es obligatorio.' });
+  }
 });
 export const residentNotificationConsentSchema = z.object({
   consented: z.boolean(),
@@ -87,6 +95,14 @@ export function normalizeWhatsAppPhone(phone: string) {
     throw new Error('Ingresa un número móvil colombiano válido de 10 dígitos.');
   }
   return `+57${national}`;
+}
+
+export function normalizeWhatsAppBusinessPhone(phone: string) {
+  const digits = phone.replace(/\D/g, '');
+  if (/^3\d{9}$/.test(digits)) return `+57${digits}`;
+  if (/^57\d{10}$/.test(digits) && digits[2] === '3') return `+${digits}`;
+  if ((phone.trim().startsWith('+') || digits.length !== 10) && /^[1-9]\d{7,14}$/.test(digits)) return `+${digits}`;
+  throw new Error('Ingresa un número de WhatsApp válido en formato internacional.');
 }
 
 export function normalizeDocumentNumber(documentNumber: string) {

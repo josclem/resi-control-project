@@ -4,6 +4,7 @@ import {
   accessSchema,
   deliveryStatusSchema,
   formatPhone,
+  normalizeWhatsAppBusinessPhone,
   normalizeWhatsAppPhone,
   normalizeDocumentNumber,
   personSchema,
@@ -47,6 +48,13 @@ describe('validación de reglas de dominio', () => {
     expect(normalizeWhatsAppPhone('300 123 4567')).toBe('+573001234567');
     expect(normalizeWhatsAppPhone('+57 300-123-4567')).toBe('+573001234567');
     expect(() => normalizeWhatsAppPhone('1234567890')).toThrow('Ingresa un número móvil colombiano válido de 10 dígitos.');
+  });
+
+  it('normaliza números de WhatsApp Business internacionales', () => {
+    expect(normalizeWhatsAppBusinessPhone('(+57) 300 123 4567')).toBe('+573001234567');
+    expect(normalizeWhatsAppBusinessPhone('+1 555-198-9735')).toBe('+15551989735');
+    expect(() => normalizeWhatsAppBusinessPhone('1234567890')).toThrow('Ingresa un número de WhatsApp válido en formato internacional.');
+    expect(() => normalizeWhatsAppBusinessPhone('123')).toThrow('Ingresa un número de WhatsApp válido en formato internacional.');
   });
 
   it('normaliza números de documento', () => {
