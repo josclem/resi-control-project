@@ -6,7 +6,7 @@ MVP para gestionar el acceso de residentes y visitantes de un conjunto residenci
 
 - **API:** Node.js, Express, TypeScript, Prisma y PostgreSQL.
 - **Frontend:** React, Vite y TypeScript.
-- **Autenticación:** JWT con perfiles `SUPER_ADMINISTRADOR`, `ADMINISTRADOR` y `VIGILANTE`.
+- **Autenticación:** JWT con perfiles de sistema `SUPER_ADMINISTRADOR`, `ADMINISTRADOR`, `VIGILANTE` y `RESIDENTE`, además de roles personalizados con permisos granulares por residencia. El SuperAdministrador puede seleccionar la residencia activa.
 - **Biometría:** preparada como integración posterior; el sistema guarda el identificador de la plantilla, no datos biométricos crudos.
 
 ## Inicio rápido
@@ -18,6 +18,8 @@ MVP para gestionar el acceso de residentes y visitantes de un conjunto residenci
 5. Iniciar con `npm run dev`.
 
 Usuario inicial de desarrollo: `admin@resicontrol.local` / `Admin123!`. Debe cambiarse antes de usar el sistema en producción.
+
+La gestión de usuarios y roles permite crear, editar y desactivar cuentas, y administrar roles personalizados. Las cuentas de residentes continúan activándose por invitación; la administración ordinaria no elimina cuentas ni sus registros históricos.
 
 La API queda en `http://localhost:4000` y el frontend en `http://localhost:5173`.
 

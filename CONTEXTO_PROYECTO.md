@@ -50,16 +50,20 @@ Archivos principales:
 ### Autenticación y residencia
 
 - Inicio de sesión con JWT.
-- Roles fijos actuales en el código:
+- Roles del sistema:
   - `SUPER_ADMINISTRADOR`
   - `ADMINISTRADOR`
   - `VIGILANTE`
   - `RESIDENTE`
+  - `PERSONALIZADO`, asociado a un rol configurable.
 - Aislamiento por residencia mediante `residenceId`.
-- El usuario y su residencia se vuelven a validar desde PostgreSQL.
-- La administración de usuarios y roles desde interfaz aún no está implementada. El esquema actual no permite configurar permisos granulares.
-- Decisión de producto para el módulo futuro: el `SUPER_ADMINISTRADOR` tendrá alcance global sobre todas las residencias y capacidades del sistema; los administradores podrán crear, editar y desactivar usuarios y roles solo dentro de su residencia, sin asignar privilegios superiores a los propios. Los roles configurables usarán permisos granulares de un catálogo permitido por el sistema.
-- La baja ordinaria de una cuenta será una desactivación que conserva la auditoría y los registros históricos asociados, no un borrado permanente.
+- El usuario, su estado y su rol se vuelven a validar desde PostgreSQL en cada solicitud autenticada; los permisos de un rol personalizado no se confían al token.
+- El `SUPER_ADMINISTRADOR` tiene alcance global, puede crear otras cuentas globales y selecciona la residencia activa mediante `X-Residence-Id`. El rol global no se cambia desde la edición ordinaria. Los demás roles no pueden cambiar de residencia.
+- Administradores y roles personalizados con permiso de gestión operan dentro de su residencia. Solo pueden asignar roles cuyos permisos no excedan los propios; no pueden crear ni editar cuentas globales.
+- Los permisos se eligen de un catálogo central. `RESIDENCES_MANAGE` es exclusivo del SuperAdministrador; los permisos predeterminados del Vigilante siguen limitados a la operación de portería.
+- La interfaz de gestión permite crear, editar y desactivar/reactivar usuarios; crear, editar y desactivar roles personalizados. Residentes siguen activándose por invitación, no mediante creación manual de cuentas.
+- Las cuentas se desactivan en vez de eliminarse; se conserva el historial. No se puede desactivar la propia cuenta ni dejar una residencia sin un usuario con `USERS_MANAGE`.
+- Esta implementación está en curso en `feature/user-role-management`; completar la validación funcional de interfaz es parte del cierre de la entrega.
 - Si una solicitud autenticada recibe `401`, el frontend elimina la sesión local, limpia los datos protegidos y vuelve al formulario de inicio de sesión.
 - Cada residencia puede tener:
   - Nombre.
@@ -414,10 +418,9 @@ El build muestra una advertencia de Vite sobre un bundle frontend grande debido 
 
 ### Pruebas automatizadas
 
-- Actualmente no existe una suite unitaria ni de integración; el build comprueba tipos y compilación, no el comportamiento.
-- La siguiente mejora técnica prioritaria es incorporar ambas suites, empezando por reglas críticas de acceso y encomiendas.
-- Las pruebas de integración deben usar una base PostgreSQL exclusiva de pruebas, nunca la base local de desarrollo ni producción.
-- Los primeros casos a cubrir son movimientos consecutivos del mismo tipo y autorización de supervisor, cierre de encomiendas y validación del receptor, y aislamiento por residencia y permisos.
+- La suite unitaria y de integración cubre reglas de acceso, encomiendas, aislamiento por residencia y permisos.
+- Las pruebas de integración usan una base PostgreSQL exclusiva llamada `resi_control_test`, nunca la base local de desarrollo ni producción.
+- Los casos de usuarios y roles verifican límites de privilegios, selección de residencia del SuperAdministrador, conservación de cuentas desactivadas y protección del último administrador.
 - Cada PR debe ejecutar las pruebas automatizadas y `npm run build`.
 
 ## Pendientes prioritarios
