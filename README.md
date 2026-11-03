@@ -57,6 +57,8 @@ La API exporta `createApp` desde `apps/api/src/server.ts`; el arranque que escuc
 
 No trabajes directamente sobre `main` ni `production`. Mantén las ramas actualizadas con el remoto y no incluyas archivos locales, secretos ni artefactos generados en los commits. La rama `qa` existente es histórica y no forma parte del flujo actual.
 
+**Herramientas Git:** este proyecto no usa GitKraken. Crear ramas, revisar cambios, hacer commits y push se realiza con Git; los pull requests y la revisión de CI se gestionan directamente en GitHub.
+
 ## Modelo inicial
 
 Se separan residentes, visitantes y usuarios del sistema. Un residente o visitante puede tener múltiples registros de acceso. Cada registro conserva tipo de acceso, fecha/hora, nombre y apartamento. Las encomiendas se asocian a una persona y conservan tipo, estado, remitente, guía, fecha de recepción y datos de entrega. Los nombres de perfiles son datos de configuración del dominio y pueden cambiarse más adelante sin afectar el flujo.

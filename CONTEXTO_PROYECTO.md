@@ -50,12 +50,16 @@ Archivos principales:
 ### Autenticación y residencia
 
 - Inicio de sesión con JWT.
-- Roles:
+- Roles fijos actuales en el código:
   - `SUPER_ADMINISTRADOR`
   - `ADMINISTRADOR`
   - `VIGILANTE`
+  - `RESIDENTE`
 - Aislamiento por residencia mediante `residenceId`.
 - El usuario y su residencia se vuelven a validar desde PostgreSQL.
+- La administración de usuarios y roles desde interfaz aún no está implementada. El esquema actual no permite configurar permisos granulares.
+- Decisión de producto para el módulo futuro: el `SUPER_ADMINISTRADOR` tendrá alcance global sobre todas las residencias y capacidades del sistema; los administradores podrán crear, editar y desactivar usuarios y roles solo dentro de su residencia, sin asignar privilegios superiores a los propios. Los roles configurables usarán permisos granulares de un catálogo permitido por el sistema.
+- La baja ordinaria de una cuenta será una desactivación que conserva la auditoría y los registros históricos asociados, no un borrado permanente.
 - Si una solicitud autenticada recibe `401`, el frontend elimina la sesión local, limpia los datos protegidos y vuelve al formulario de inicio de sesión.
 - Cada residencia puede tener:
   - Nombre.
