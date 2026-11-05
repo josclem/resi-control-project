@@ -34,6 +34,28 @@ export const deliveryStatusSchema = z.object({
   }
 });
 export const deliveryStatusFilterSchema = z.nativeEnum(DeliveryStatus);
+const visitWindowBaseSchema = z.object({
+  visitorName: z.string().trim().min(2).max(120),
+  visitorDocumentNumber: z.string().trim().max(40).optional(),
+  observations: z.string().trim().max(500).optional(),
+  vehiclePlate: z.string().trim().max(10).optional(),
+  vehicleType: z.nativeEnum(VehicleType).optional(),
+  validFrom: z.string().datetime({ offset: true }),
+  validUntil: z.string().datetime({ offset: true }),
+});
+function validateVisitWindow(value: z.infer<typeof visitWindowBaseSchema>, context: z.RefinementCtx) {
+  if (new Date(value.validUntil) <= new Date(value.validFrom)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['validUntil'], message: 'La vigencia debe terminar después de su inicio.' });
+  }
+  if (Boolean(value.vehiclePlate) !== Boolean(value.vehicleType)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['vehicleType'], message: 'Indica la placa y el tipo de vehículo, o deja ambos vacíos.' });
+  }
+}
+export const residentVisitCreateSchema = visitWindowBaseSchema.superRefine(validateVisitWindow);
+export const porterVisitCreateSchema = visitWindowBaseSchema.extend({
+  residentPersonId: z.number().int().positive(),
+  residentApprovalConfirmed: z.literal(true),
+}).superRefine(validateVisitWindow);
 export const personSchema = z.object({
   type: z.nativeEnum(PersonType),
   fullName: z.string().trim().min(2),

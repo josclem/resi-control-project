@@ -51,6 +51,19 @@ enum DeliveryStatus {
   DEVUELTA
 }
 
+enum VisitStatus {
+  AUTORIZADA
+  CANCELADA
+  NOSHOW
+  EN_CURSO
+  COMPLETADA
+}
+
+enum VisitOrigin {
+  RESIDENTE
+  PORTERIA
+}
+
 model Residence {
   id          Int             @id @default(autoincrement())
   name        String
@@ -66,6 +79,7 @@ model Residence {
   settings    SystemSetting[]
   deliveries  Delivery[]
   customRoles CustomRole[]
+  visits       VisitPreRegistration[]
 }
 
 model User {
@@ -88,6 +102,7 @@ model User {
   deliveredDeliveries Delivery[] @relation("DeliveryDelivered")
   customRolesCreated CustomRole[] @relation("CustomRoleCreator")
   residentInvitationsCreated ResidentInvitation[] @relation("ResidentInvitationCreator")
+  visitsCreated              VisitPreRegistration[] @relation("VisitCreator")
 }
 
 model CustomRole {
@@ -137,6 +152,8 @@ model Person {
   @@index([apartmentNumber])
   @@index([residenceId, buildingSectionType, buildingSectionNumber])
   @@unique([residenceId, documentTypeId, documentNumber])
+  residentVisits        VisitPreRegistration[] @relation("VisitResident")
+  visitsAsVisitor       VisitPreRegistration[] @relation("VisitVisitor")
 }
 
 model PersonPhoto {
@@ -212,6 +229,9 @@ model AccessLog {
   @@index([occurredAt])
   @@index([accessType])
   @@index([vehicleId])
+  visitPreRegistrationId Int?
+  visitPreRegistration   VisitPreRegistration? @relation(fields: [visitPreRegistrationId], references: [id])
+  @@index([visitPreRegistrationId])
 }
 
 model SystemSetting {
@@ -265,4 +285,34 @@ model ResidentInvitation {
   createdBy   User      @relation("ResidentInvitationCreator", fields: [createdById], references: [id])
 
   @@index([personId, expiresAt])
+}
+
+model VisitPreRegistration {
+  id                        Int          @id @default(autoincrement())
+  visitorName               String
+  visitorDocumentNumber     String?
+  observations              String?
+  vehiclePlate              String?
+  vehicleType               VehicleType?
+  validFrom                 DateTime
+  validUntil                DateTime
+  status                    VisitStatus  @default(AUTORIZADA)
+  origin                    VisitOrigin
+  residentApprovalConfirmed Boolean      @default(false)
+  createdAt                 DateTime     @default(now())
+  canceledAt                DateTime?
+  checkedInAt               DateTime?
+  checkedOutAt              DateTime?
+  residentPersonId          Int
+  visitorPersonId           Int?
+  createdById               Int
+  residenceId               Int          @default(1)
+  resident                  Person       @relation("VisitResident", fields: [residentPersonId], references: [id])
+  visitor                   Person?      @relation("VisitVisitor", fields: [visitorPersonId], references: [id])
+  createdBy                 User         @relation("VisitCreator", fields: [createdById], references: [id])
+  residence                 Residence    @relation(fields: [residenceId], references: [id])
+  accessLogs                AccessLog[]
+
+  @@index([residenceId, status, validUntil])
+  @@index([residentPersonId, createdAt])
 }
