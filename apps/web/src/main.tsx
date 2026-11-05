@@ -246,6 +246,7 @@ function App() {
   const [activeResidenceId, setActiveResidenceId] = useState(localStorage.getItem('activeResidenceId') ?? '');
   const [email, setEmail] = useState('admin@resicontrol.local');
   const [password, setPassword] = useState('');
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [loginError, setLoginError] = useState('');
   const [loginNotice, setLoginNotice] = useState('');
   const [invitationToken, setInvitationToken] = useState(() => new URLSearchParams(window.location.hash.slice(1)).get('invite') ?? '');
@@ -1302,7 +1303,7 @@ function App() {
   if (!authenticated) return <main className="login-page"><form className="login-card" onSubmit={login}>
     <span className="eyebrow">RESI CONTROL</span><h1>Iniciar sesión</h1><p>Ingresa para administrar el acceso residencial.</p>
     <label>Correo<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label>
-    <label>Contraseña<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
+    <label>Contraseña<div className="password-input-wrap"><input type={showLoginPassword ? 'text' : 'password'} autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} /><PasswordVisibilityButton visible={showLoginPassword} onToggle={() => setShowLoginPassword((visible) => !visible)} label="contraseña" /></div></label>
     {loginError && <div className="notice">{loginError}</div>}{loginNotice && <div className="success">{loginNotice}</div>}<button type="submit">Ingresar</button>
   </form></main>;
 
