@@ -63,7 +63,7 @@ Archivos principales:
 - Los permisos se eligen de un catálogo central. `RESIDENCES_MANAGE` es exclusivo del SuperAdministrador; los permisos predeterminados del Vigilante siguen limitados a la operación de portería.
 - La interfaz de gestión permite crear, editar y desactivar/reactivar usuarios; crear, editar y desactivar roles personalizados. Residentes siguen activándose por invitación, no mediante creación manual de cuentas.
 - Las cuentas se desactivan en vez de eliminarse; se conserva el historial. No se puede desactivar la propia cuenta ni dejar una residencia sin un usuario con `USERS_MANAGE`.
-- Esta implementación está en curso en `feature/user-role-management`; completar la validación funcional de interfaz es parte del cierre de la entrega.
+- La administración de usuarios y roles está implementada; la ficha del residente guarda correo de contacto y la invitación actualiza ese correo. La cuenta Gmail y la contraseña de aplicación están en `apps/api/.env`, ignorado por Git.
 - Si una solicitud autenticada recibe `401`, el frontend elimina la sesión local, limpia los datos protegidos y vuelve al formulario de inicio de sesión.
 - Cada residencia puede tener:
   - Nombre.
@@ -145,7 +145,7 @@ Archivos principales:
   - Bloquear.
   - Solicitar autorización de supervisor.
 - En modo `BLOCK`, dos movimientos consecutivos del mismo tipo se rechazan con `409` (`IRREGULAR_ACCESS`). En modo `SUPERVISOR`, la excepción requiere credenciales válidas y queda asociada al supervisor que la autorizó.
-- Validación del fix (2026-10-28): compilación de API y frontend correcta. Queda pendiente reproducir el caso de Jose Rojas con datos reales; no se alteró el historial de movimientos existente.
+- El caso de movimiento duplicado reportado ocurrió antes de las validaciones actuales. El registro histórico se corrigió con autorización del usuario y el caso quedó resuelto; el control actual serializa las capturas y rechaza movimientos repetidos según el modo configurado. No se deben hacer cambios adicionales al historial sin autorización.
 - El escaneo de un vehículo solo acepta propietarios activos dentro de la misma residencia.
 - Reporte de últimos movimientos.
 - Detalle ampliado al seleccionar un movimiento:
@@ -405,7 +405,15 @@ En Windows, si `prisma generate` falla con `EPERM` por el motor bloqueado, hay q
 
 ## Estado actual de validación
 
-- `npm run build` termina correctamente para API y frontend.
+- Validación manual en navegador (2026-11-04), usando solo `resi_control_test`: login, alta de residente/visitante, accesos peatonales y vehiculares, tablero, administración de usuarios y roles, bloqueo de movimiento repetido, autorización de supervisor y encomiendas.
+- Validación manual de invitaciones en `resi_control_test`: listado de residentes invitables, error claro cuando SMTP no está configurado, activación con contraseña propia, inicio de sesión y pantalla de residente. Los datos temporales se limpiaron.
+- `verify()` pasó y se envió una invitación real de prueba al correo indicado por el usuario usando la base local `resi_control`; Avast estaba temporalmente desactivado y no se desactivó la validación TLS. El usuario recibió el mensaje, abrió el enlace y activó la cuenta.
+- El portal de residentes permite crear, listar y cancelar prerregistros; el flujo de portería registra autorizaciones sin prerregistro con origen auditado y movimientos de entrada/salida vinculados. Las pruebas de integración usan `resi_control_test`.
+- El flujo manual confirmó entrada/salida de persona y vehículo. Un movimiento repetido en modo `BLOCK` no creó un registro; con modo `SUPERVISOR`, el formulario mantuvo la selección y la autorización creó un solo movimiento.
+- Una encomienda de prueba se registró, entregó con el nombre de quien la retiró y otra se marcó devuelta.
+- Un código desconocido de 32 caracteres enviado a `POST /api/access/scan` respondió `404` con `Código no reconocido.`. No se probó un QR antiguo con cámara.
+- No se modificó la base local de desarrollo para estas pruebas.
+- `npm run build` termina correctamente para API y frontend; Vite conserva la advertencia del bundle superior a 500 kB.
 - Prisma fue regenerado después de agregar `Delivery`, `DeliveryType` y `DeliveryStatus`.
 - La base de datos local fue sincronizada con `db:push --accept-data-loss`.
 - Los `accessCode` de personas y vehículos fueron regenerados; los códigos anteriores ya no son válidos.
@@ -418,63 +426,34 @@ El build muestra una advertencia de Vite sobre un bundle frontend grande debido 
 
 ### Pruebas automatizadas
 
-- La suite unitaria y de integración cubre reglas de acceso, encomiendas, aislamiento por residencia y permisos.
+- `npm test`: correcto, 5 archivos y 15 pruebas.
+- Suite completa de integración de API: correcta, 4 archivos y 19 pruebas, usando exclusivamente `resi_control_test`.
+- `npm run build`: correcto para API y frontend.
 - Las pruebas de integración usan una base PostgreSQL exclusiva llamada `resi_control_test`, nunca la base local de desarrollo ni producción.
 - Los casos de usuarios y roles verifican límites de privilegios, selección de residencia del SuperAdministrador, conservación de cuentas desactivadas y protección del último administrador.
 - Cada PR debe ejecutar las pruebas automatizadas y `npm run build`.
 
 ## Pendientes prioritarios
 
-### 1. Probar manualmente los códigos
+### 1. Probar el escaneo con hardware de portería
 
-El QR generado ya se validó decodificándolo en un navegador real y el escaneo registra movimientos correctamente. Queda pendiente:
+- Leer un QR impreso con una cámara adecuada y un código de barras con lector USB.
+- Comprobar el flujo de autorización de supervisor durante el escaneo; por formulario manual ya se comprobó que la selección se conserva y no se duplica el movimiento.
+- Validar con hardware si el QR antiguo muestra el código leído y un error claro.
 
-- Escanear el QR impreso con la webcam actual.
-- Escanear el código de barras con un lector USB.
-- Confirmar el ciclo entrada/salida con persona y con vehículo.
-- Verificar que un QR viejo sea rechazado y muestre el texto leído en el mensaje de error.
+### 2. Movimiento duplicado reportado
 
-### 2. Revisar la experiencia de escaneo automático
+- Resuelto: el incidente se originó antes de las validaciones actuales y se corrigió con autorización del usuario.
+- La API serializa el registro y las pruebas cubren el rechazo de movimientos repetidos; no hay una investigación pendiente salvo que vuelva a reproducirse.
+- No modificar registros históricos sin autorización explícita.
 
-Decidir si, en producción, se desea:
+### 3. Validar el producto y priorizar el siguiente incremento
 
-- Mantener el registro automático elegido actualmente.
-- Mostrar una confirmación visual más grande después de cada escaneo.
-- Agregar un breve bloqueo temporal para evitar dos lecturas accidentales seguidas.
-- Emitir sonido o vibración al leer correctamente.
+- Validar la operación con vigilantes y administradores y conseguir un conjunto para piloto.
+- Definir reglas de autorización y vigencia para visitas, y el canal de notificaciones.
+- Priorizar reportes de acceso y encomiendas con base en el piloto.
 
-### 3. Completar la autorización de supervisor en el escaneo
-
-El flujo ya detecta que se necesita supervisor y conserva la selección del movimiento, pero debe probarse manualmente para confirmar que:
-
-- El formulario queda abierto.
-- El tipo de movimiento correcto queda seleccionado.
-- El supervisor puede completar la autorización.
-- El movimiento no se duplica.
-
-### 4. Implementar huella dactilar cuando exista el dispositivo
-
-La opción está visible como “próximamente”, pero aún falta:
-
-- Conocer el modelo exacto del lector.
-- Confirmar si funciona por USB, SDK del fabricante o WebAuthn.
-- Definir cómo se registrará la plantilla o referencia biométrica.
-- No guardar huellas crudas sin una decisión explícita de seguridad y cumplimiento.
-
-### 5. Mejorar la generación de credenciales
-
-Ya están implementados:
-
-- Botón para descargar el QR como imagen PNG.
-- Botón para imprimir una credencial con nombre y código.
-
-Faltaría considerar:
-
-- Botón para descargar o imprimir el código de barras.
-- Vista de credencial con placa o apartamento.
-- Regeneración controlada de un código si se pierde o se compromete.
-
-### 6. Revisar consistencia visual
+### 4. Limpieza y optimización técnica
 
 El archivo [styles.css](C:/Users/klement/resi-control/apps/web/src/styles.css) creció mediante varias iteraciones y contiene reglas repetidas. Conviene hacer una limpieza posterior, cuidando no alterar:
 
@@ -482,8 +461,9 @@ El archivo [styles.css](C:/Users/klement/resi-control/apps/web/src/styles.css) c
 - La grilla lineal de vehículos.
 - Los diálogos de personas y vehículos.
 - El responsive existente.
+- El bundle frontend supera 500 kB; puede optimizarse con carga diferida de lectura/generación de códigos.
 
-### 7. Resolver la fotografía de personas
+### 5. Resolver la fotografía de personas
 
 Las fotografías tienen un límite de 2 MB. Si una imagen supera ese tamaño, la API la rechaza correctamente. Puede mejorarse la experiencia agregando:
 
@@ -491,15 +471,7 @@ Las fotografías tienen un límite de 2 MB. Si una imagen supera ese tamaño, la
 - Mensaje de tamaño más visible antes de enviar.
 - Redimensionamiento automático manteniendo la calidad.
 
-### 8. Optimizar el bundle del frontend
-
-El build funciona, pero Vite informa que el bundle supera 500 kB. Se puede mejorar cargando bajo demanda:
-
-- `@zxing/browser`.
-- Generación de QR.
-- Generación de códigos de barras.
-
-### 9. Completar el módulo de encomiendas
+### 6. Completar el módulo de encomiendas
 
 El flujo básico ya funciona. Siguientes pasos sugeridos:
 
@@ -510,7 +482,7 @@ El flujo básico ya funciona. Siguientes pasos sugeridos:
 - Integrar la entrega con el movimiento de acceso del visitante o mensajero.
 - Permitir que un residente autorice a otra persona para retirar la encomienda.
 
-### 10. Definir el hardware de lectura definitivo
+### 7. Definir el hardware de lectura definitivo
 
 La webcam actual tiene foco fijo y no lee de forma confiable un QR mostrado en pantalla. Opciones:
 
@@ -518,32 +490,19 @@ La webcam actual tiene foco fijo y no lee de forma confiable un QR mostrado en p
 - Cámara con autofoco.
 - Imprimir credenciales y usarlas en papel.
 
-### 11. App de residentes para pre-registrar visitas (planificado, no implementado)
+### 8. Portal y prerregistros de visitas para residentes
 
-Funcionalidad futura anotada para planificación. Consiste en una aplicación para residentes donde puedan registrar previamente una visita, peatonal o con vehículo, antes de que llegue a la residencia.
+Implementado como portal web para las cuentas de residente activadas. Reglas y flujo acordados:
 
-Flujo esperado:
+1. El residente es quien autoriza el prerregistro, indicando nombre del visitante y, opcionalmente, documento, observaciones (máximo 500 caracteres) y vehículo.
+2. El residente define la vigencia con controles de calendario y hora. Por defecto inicia a la hora actual y termina a la medianoche del día actual (00:00 del día siguiente); puede modificar el inicio y fin.
+3. Solo el residente dueño del apartamento puede ver y cancelar sus visitas. Puede cancelar mientras el estado siga `AUTORIZADA`; las visitas canceladas o ingresadas no se pueden cancelar.
+4. Si alguien llega sin prerregistro, portería puede registrarlo después de llamar o contactar al residente por el proceso habitual y recibir aprobación. Esa verificación ocurre fuera del sistema; el vigilante confirma el resultado en la interfaz. Se guarda el origen `PORTERIA`, quién lo registró y la marca `residentApprovalConfirmed`.
+5. Portería registra entrada solo durante la vigencia autorizada. El sistema crea el visitante, el `AccessLog` de entrada y los enlaza al prerregistro. La salida crea otro `AccessLog` vinculado y completa la visita.
+6. Si vence la vigencia sin entrada, el estado cambia a `NOSHOW`. La API actualiza visitas vencidas al iniciar, cada minuto y al listar visitas.
+7. El portal usa la zona horaria local del navegador para mostrar y enviar fechas; queda pendiente definir la zona horaria oficial de la residencia antes del despliegue multi-región.
 
-1. El residente crea un pre-registro de visita con:
-   - Nombre y documento del visitante.
-   - Placa y tipo de vehículo, si aplica.
-   - Fecha y ventana horaria de la visita.
-   - Vigencia del pre-registro.
-   - Observaciones o autorización.
-2. El sistema guarda el pre-registro asociado al residente y a su apartamento.
-3. Cuando la visita llega a la entrada, se anuncia en portería y solo se identifica con su documento o placa; no se vuelven a capturar todos los datos.
-4. El sistema valida que exista un pre-registro vigente y registra la entrada del visitante.
-5. En ese momento se envía una notificación al residente avisando que su visita ya llegó.
-6. Al salir la visita, se registra la salida y se cierra el pre-registro.
-
-Consideraciones:
-
-- Requiere autenticación de residentes (hoy solo existen usuarios administradores y vigilantes).
-- Requiere app móvil o una vista web para residentes.
-- Requiere notificaciones push, correo o WhatsApp; el canal está por definir.
-- Hay que definir qué pasa con visitas sin pre-registro, visitas vencidas y visitas rechazadas.
-- Debe integrarse con `AccessLog` para no duplicar movimientos.
-- No implementar todavía; queda solo documentado como siguiente fase.
+La notificación cuando llega una visita no está implementada; se definirá y priorizará por separado.
 
 ## Problemas o detalles conocidos
 
@@ -561,26 +520,20 @@ Consideraciones:
 
 El último trabajo completado fue:
 
-1. Mejorar el escáner QR/código de barras: formatos restringidos, validación de 32 hex, zoom, selector de cámara, escaneo automático y diagnóstico.
-2. Agregar descarga e impresión de credenciales QR.
-3. Regenerar los `accessCode` de personas y vehículos.
-4. Agregar `Cache-Control: no-store` a la API.
-5. Crear el modelo `Delivery` con tipos `COMIDA`, `PAQUETE`, `RECIBO`, `CORREO` y `OTRO`.
-6. Implementar `GET /api/deliveries`, `POST /api/deliveries` y `PUT /api/deliveries/:id/status`.
-7. Agregar `totals.pendingDeliveries` al dashboard.
-8. Construir la pantalla "Encomiendas" con registro, filtros, entrega y devolución.
-9. Confirmar que `npm run build` termina correctamente y probar el flujo en navegador.
+1. Verificar manualmente en `resi_control_test` los flujos de personas, vehículos, accesos, movimientos repetidos, autorización de supervisor y encomiendas.
+2. Implementar invitaciones de residentes por correo, activación con contraseña propia y asociación con su registro de persona.
+3. Comprobar activación y login desde el navegador; probar respuesta clara cuando SMTP aún no está configurado.
+4. Ejecutar `npm run build`, `npm test` y pruebas de integración, incluidas las nuevas rutas de visitas.
 
 El siguiente paso recomendado es:
 
-- Validar el módulo de encomiendas con usuarios reales de portería.
-- Definir el canal de notificación al residente.
-- Probar el escaneo con un lector USB o una cámara con autofoco.
-- Revisar el movimiento duplicado de Jose Rojas (dos `ENTRADA` seguidas con modo `BLOCK`).
-- Limpiar el CSS duplicado y el código muerto de `createVehicle`.
+- Publicar el portal bajo HTTPS antes de invitar residentes reales.
+- Probar en navegador los flujos de prerregistro y portería; definir zona horaria oficial y notificaciones.
+- Priorizar reportes según el piloto.
+- Probar QR y código de barras con hardware real cuando esté disponible.
+- Validar los flujos con personal de portería y conseguir un conjunto para piloto cuando sea posible.
 
-Funcionalidad futura ya anotada (no implementar todavía):
+Mejoras futuras relacionadas:
 
-- App de residentes para pre-registrar visitas peatonales o vehiculares.
-- La visita se anuncia y se identifica al llegar; el sistema valida el pre-registro y registra la entrada.
-- El residente recibe una notificación cuando su visita llega.
+- Notificar al residente cuando una visita llega; el canal está por definir.
+- Publicar frontend y API bajo HTTPS para invitar residentes y usar el portal fuera del equipo local.

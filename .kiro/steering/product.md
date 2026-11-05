@@ -44,12 +44,17 @@ La hipótesis inicial es un SaaS mensual por conjunto, no una licencia única. L
 
 Antes de fijar precios se deben entrevistar clientes potenciales y ofrecer una prueba piloto controlada, por ejemplo de 30 días.
 
+## Funcionalidad implementada después del MVP
+
+- Invitación de cuentas de residentes por correo por parte de la administración, vinculadas a una persona previamente registrada.
+- Portal web de residentes para autorizar, consultar y cancelar prerregistros de visitas peatonales o con vehículo.
+- Portería puede registrar una visita sin prerregistro solo después de confirmar autorización externa del residente; el origen y operador quedan auditados.
+- Al identificar una visita autorizada vigente, portería registra entrada y salida enlazadas al prerregistro; si vence sin ingreso, queda `NOSHOW`.
+
 ## Roadmap posterior al MVP
 
 Solo después de validar el flujo básico con conjuntos reales se priorizarán:
 
-- App de residentes para pre-registrar visitas peatonales o con vehículo.
-- Validación del pre-registro en portería y registro automático de la entrada cuando la visita se identifica.
 - Notificación al residente en tiempo real cuando su visita llega.
 - Invitaciones y autorizaciones de visitantes desde el celular del residente.
 - Notificación al residente cuando llega una encomienda.
