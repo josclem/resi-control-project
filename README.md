@@ -19,7 +19,7 @@ MVP para gestionar el acceso de residentes y visitantes de un conjunto residenci
 
 Usuario inicial de desarrollo: `admin@resicontrol.local` / `Admin123!`. Debe cambiarse antes de usar el sistema en producción.
 
-La gestión de usuarios y roles permite crear, editar y desactivar cuentas, y administrar roles personalizados. Las cuentas de residentes continúan activándose por invitación; la administración ordinaria no elimina cuentas ni sus registros históricos.
+La gestión de usuarios y roles permite crear, editar y desactivar cuentas, y administrar roles personalizados. La administración de la residencia decide si asigna una cuenta individual a cada portero o usa una cuenta compartida; las cuentas individuales permiten atribuir los registros de portería a cada operador. El botón **Cerrar sesión** está disponible en el portal de residente y la interfaz de administración. Las cuentas de residentes continúan activándose por invitación; la administración ordinaria no elimina cuentas ni sus registros históricos.
 
 La API queda en `http://localhost:4000` y el frontend en `http://localhost:5173`.
 
@@ -48,15 +48,17 @@ Para Gmail:
    SMTP_HOST="smtp.gmail.com"
    SMTP_PORT=465
    SMTP_SECURE=true
-   SMTP_USER="tu-cuenta@gmail.com"
+   SMTP_USER="resicontrol.co@gmail.com"
    SMTP_APP_PASSWORD="contraseña-de-aplicación"
-   EMAIL_FROM="Resi Control <tu-cuenta@gmail.com>"
+   EMAIL_FROM="Resi Control <resicontrol.co@gmail.com>"
    ```
 
-   `SMTP_USER` y el correo de `EMAIL_FROM` deben pertenecer a la cuenta Gmail autorizada. En este proyecto la cuenta remitente es `tu-cuenta@gmail.com`. Mantén `.env` fuera de Git y no compartas ni registres la contraseña de aplicación.
+   `SMTP_USER` y el correo de `EMAIL_FROM` deben pertenecer a la cuenta Gmail autorizada. En este proyecto la cuenta remitente es `resicontrol.co@gmail.com`. Mantén `.env` fuera de Git y no compartas ni registres la contraseña de aplicación.
 4. Reinicia la API después de cambiar `.env`.
 
 `http://localhost:5173` solo sirve para probar el enlace en el mismo equipo donde corre la aplicación. Antes de invitar residentes reales, publica el frontend y la API bajo HTTPS; configura `WEB_APP_URL` y `WEB_ORIGIN` en `apps/api/.env`, y `VITE_API_URL` en `apps/web/.env` antes de compilar el frontend. Luego se puede cambiar Gmail por un proveedor SMTP del dominio propio sin cambiar el flujo de invitación.
+
+El bloqueo observado con Avast Free afecta la conexión SMTP de la API ejecutada localmente en Windows; no implica que Avast vaya a intervenir cuando la API se ejecute en un servidor de producción. Antes de publicar, verifica desde el entorno de hosting que permita conexiones salientes al SMTP elegido (Gmail usa TCP 465 con esta configuración), que confíe en los certificados TLS y que acepte sus credenciales. Configura las credenciales como secretos del hosting, nunca en el repositorio. Si el proveedor de hosting bloquea SMTP, usa un proveedor de correo con API o un canal SMTP compatible; no desactives la validación TLS.
 
 ## Pruebas automatizadas
 
