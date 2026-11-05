@@ -30,6 +30,28 @@
   gap: 12px;
 }
 
+.communication-confirmation {
+  width: min(100%, 520px);
+}
+
+.communication-confirmation > p {
+  margin-bottom: 16px;
+}
+
+.communication-confirmation .communication-confirmation-warning {
+  padding: 12px 14px;
+  border-radius: 8px;
+  color: #8a4a16;
+  background: #fff8ed;
+}
+
+.communication-confirmation-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 24px;
+}
+
 .communication-resident-list {
   display: grid;
   max-height: 420px;

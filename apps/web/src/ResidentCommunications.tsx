@@ -92,6 +92,7 @@ export function ResidentCommunications() {
   const [consentSource, setConsentSource] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [sendConfirmationOpen, setSendConfirmationOpen] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
 
@@ -185,7 +186,7 @@ export function ResidentCommunications() {
     }
   }
 
-  async function sendCommunication(event: FormEvent) {
+  function sendCommunication(event: FormEvent) {
     event.preventDefault();
     if (!eligibleSelected.length) {
       setError(messageType === 'PROMOTIONAL'
@@ -193,10 +194,11 @@ export function ResidentCommunications() {
         : 'Selecciona al menos un residente con correo.');
       return;
     }
-    const confirmed = window.confirm(
-      `¿Enviar "${subject}" a ${eligibleSelected.length} direcciones de correo?${excludedWithoutConsent ? ` Se excluirán ${excludedWithoutConsent} residentes sin autorización promocional vigente.` : ''}`,
-    );
-    if (!confirmed) return;
+    setSendConfirmationOpen(true);
+  }
+
+  async function confirmSendCommunication() {
+    if (saving) return;
     setSaving(true);
     setError('');
     setNotice('');
@@ -224,8 +226,10 @@ export function ResidentCommunications() {
       setSubject('');
       setBody('');
       resetSelection();
+      setSendConfirmationOpen(false);
       await loadHistory();
     } catch (reason) {
+      setSendConfirmationOpen(false);
       setError(reason instanceof Error ? reason.message : 'No se pudo enviar el comunicado.');
     } finally {
       setSaving(false);
@@ -289,6 +293,33 @@ export function ResidentCommunications() {
       {messageType === 'PROMOTIONAL' && <p className="form-full">El correo incluirá un enlace para darse de baja. Se enviará únicamente a direcciones con autorización registrada por administración.</p>}
       <button type="submit" disabled={saving || loading || !eligibleSelected.length}>{saving ? 'Enviando…' : `Enviar a ${eligibleSelected.length} destinatario(s)`}</button>
     </form>
+
+    {sendConfirmationOpen && <div
+      className="modal-backdrop"
+      onClick={() => { if (!saving) setSendConfirmationOpen(false); }}
+      onKeyDown={(event) => {
+        if (event.key === 'Escape' && !saving) setSendConfirmationOpen(false);
+      }}
+    >
+      <section
+        className="form-panel modal-panel communication-confirmation"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="communication-confirmation-title"
+        aria-describedby="communication-confirmation-description"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="panel-heading">
+          <div><span className="eyebrow">CONFIRMACIÓN</span><h2 id="communication-confirmation-title">Enviar comunicado</h2></div>
+        </div>
+        <p id="communication-confirmation-description">¿Enviar <strong>“{subject}”</strong> a <strong>{eligibleSelected.length}</strong> direcciones de correo?</p>
+        {excludedWithoutConsent > 0 && <p className="communication-confirmation-warning">Se excluirán {excludedWithoutConsent} residentes sin autorización promocional vigente.</p>}
+        <div className="communication-confirmation-actions">
+          <button type="button" className="secondary" autoFocus disabled={saving} onClick={() => setSendConfirmationOpen(false)}>Cancelar</button>
+          <button type="button" disabled={saving} onClick={() => void confirmSendCommunication()}>{saving ? 'Enviando…' : 'Confirmar envío'}</button>
+        </div>
+      </section>
+    </div>}
 
     <div className="panel-heading communication-history-heading"><div><span className="eyebrow">HISTORIAL</span><h3>Últimos comunicados</h3></div></div>
     {history.length ? <div className="communication-history">{history.map((item) => {
