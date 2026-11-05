@@ -51,6 +51,19 @@ enum DeliveryStatus {
   DEVUELTA
 }
 
+enum VisitStatus {
+  AUTORIZADA
+  CANCELADA
+  NOSHOW
+  EN_CURSO
+  COMPLETADA
+}
+
+enum VisitOrigin {
+  RESIDENTE
+  PORTERIA
+}
+
 model Residence {
   id          Int             @id @default(autoincrement())
   name        String
@@ -66,6 +79,7 @@ model Residence {
   settings    SystemSetting[]
   deliveries  Delivery[]
   customRoles CustomRole[]
+  visits       VisitPreRegistration[]
 }
 
 model User {
@@ -78,6 +92,8 @@ model User {
   createdAt    DateTime @default(now())
   residenceId  Int      @default(1)
   residence    Residence @relation(fields: [residenceId], references: [id])
+  residentPersonId Int? @unique
+  residentPerson Person? @relation("ResidentAccount", fields: [residentPersonId], references: [id])
   customRoleId Int?
   customRole   CustomRole? @relation("UserCustomRole", fields: [customRoleId], references: [id])
   accessLogs   AccessLog[]
@@ -85,6 +101,8 @@ model User {
   receivedDeliveries Delivery[] @relation("DeliveryReceived")
   deliveredDeliveries Delivery[] @relation("DeliveryDelivered")
   customRolesCreated CustomRole[] @relation("CustomRoleCreator")
+  residentInvitationsCreated ResidentInvitation[] @relation("ResidentInvitationCreator")
+  visitsCreated              VisitPreRegistration[] @relation("VisitCreator")
 }
 
 model CustomRole {
@@ -115,6 +133,7 @@ model Person {
   buildingSectionNumber String?
   apartmentNumber  String
   phone            String?
+  email String?
   biometricRef     String?    @unique
   active           Boolean    @default(true)
   createdAt        DateTime   @default(now())
@@ -126,11 +145,15 @@ model Person {
   documentType     DocumentType? @relation(fields: [documentTypeId], references: [id])
   photo            PersonPhoto?
   deliveries       Delivery[]
+  residentUser User? @relation("ResidentAccount")
+  residentInvitations ResidentInvitation[]
 
   @@index([fullName])
   @@index([apartmentNumber])
   @@index([residenceId, buildingSectionType, buildingSectionNumber])
   @@unique([residenceId, documentTypeId, documentNumber])
+  residentVisits        VisitPreRegistration[] @relation("VisitResident")
+  visitsAsVisitor       VisitPreRegistration[] @relation("VisitVisitor")
 }
 
 model PersonPhoto {
@@ -206,6 +229,9 @@ model AccessLog {
   @@index([occurredAt])
   @@index([accessType])
   @@index([vehicleId])
+  visitPreRegistrationId Int?
+  visitPreRegistration   VisitPreRegistration? @relation(fields: [visitPreRegistrationId], references: [id])
+  @@index([visitPreRegistrationId])
 }
 
 model SystemSetting {
@@ -243,4 +269,50 @@ model Delivery {
   @@index([status])
   @@index([receivedAt])
   @@index([personId])
+}
+
+model ResidentInvitation {
+  id          Int       @id @default(autoincrement())
+  email       String
+  tokenHash   String    @unique
+  expiresAt   DateTime
+  acceptedAt  DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  personId    Int
+  createdById Int
+  person      Person    @relation(fields: [personId], references: [id], onDelete: Cascade)
+  createdBy   User      @relation("ResidentInvitationCreator", fields: [createdById], references: [id])
+
+  @@index([personId, expiresAt])
+}
+
+model VisitPreRegistration {
+  id                        Int          @id @default(autoincrement())
+  visitorName               String
+  visitorDocumentNumber     String?
+  observations              String?
+  vehiclePlate              String?
+  vehicleType               VehicleType?
+  validFrom                 DateTime
+  validUntil                DateTime
+  status                    VisitStatus  @default(AUTORIZADA)
+  origin                    VisitOrigin
+  residentApprovalConfirmed Boolean      @default(false)
+  createdAt                 DateTime     @default(now())
+  canceledAt                DateTime?
+  checkedInAt               DateTime?
+  checkedOutAt              DateTime?
+  residentPersonId          Int
+  visitorPersonId           Int?
+  createdById               Int
+  residenceId               Int          @default(1)
+  resident                  Person       @relation("VisitResident", fields: [residentPersonId], references: [id])
+  visitor                   Person?      @relation("VisitVisitor", fields: [visitorPersonId], references: [id])
+  createdBy                 User         @relation("VisitCreator", fields: [createdById], references: [id])
+  residence                 Residence    @relation(fields: [residenceId], references: [id])
+  accessLogs                AccessLog[]
+
+  @@index([residenceId, status, validUntil])
+  @@index([residentPersonId, createdAt])
 }

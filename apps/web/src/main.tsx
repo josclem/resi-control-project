@@ -5,18 +5,37 @@ import QRCode from 'qrcode';
 import { FormEvent, StrictMode, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { UserAdministration } from './UserAdministration';
+import { apiBaseUrl } from './api';
 import './access-search.css';
 import './styles.css';
 
 type BuildingSectionType = 'TORRE' | 'INTERIOR';
 type PersonLocation = { buildingSectionType: BuildingSectionType | null; buildingSectionNumber: string | null; apartmentNumber: string };
 type Log = { id: number; accessType: 'ENTRADA' | 'SALIDA'; occurredAt: string; person: { id: number; fullName: string; type: string; documentNumber?: string | null; phone?: string | null; photoUrl?: string | null } & PersonLocation; vehicle?: { id: number; plate: string; type: string; brand?: string | null; model?: string | null; color?: string | null; photoUrl?: string | null } | null };
-type Person = { id: number; accessCode: string; type: 'RESIDENTE' | 'VISITANTE'; fullName: string; documentNumber?: string | null; phone?: string | null; documentType?: { code: string; name: string } | null; photoUrl?: string | null } & PersonLocation;
+type Person = { id: number; accessCode: string; type: 'RESIDENTE' | 'VISITANTE'; fullName: string; documentNumber?: string | null; email?: string | null; phone?: string | null; documentType?: { code: string; name: string } | null; photoUrl?: string | null } & PersonLocation;
 type DocumentType = { id: number; code: string; name: string };
 type Vehicle = { id: number; accessCode: string; personId: number; plate: string; type: 'AUTOMOVIL' | 'MOTOCICLETA' | 'BICICLETA' | 'OTRO'; brand?: string | null; model?: string | null; color?: string | null; photoUrl?: string | null; person: { fullName: string; type: string } & PersonLocation };
 type Residence = { id: number; name: string; code: string; hasLogo: boolean; logo?: string | null; userRole?: string };
 type AvailableResidence = { id: number; name: string; code: string };
 type AccessCaptureMode = 'MANUAL' | 'BARCODE' | 'QR' | 'FINGERPRINT';
+type VisitStatus = 'AUTORIZADA' | 'CANCELADA' | 'NOSHOW' | 'EN_CURSO' | 'COMPLETADA';
+type Visit = {
+  id: number;
+  visitorName: string;
+  visitorDocumentNumber: string | null;
+  observations: string | null;
+  vehiclePlate: string | null;
+  vehicleType: Vehicle['type'] | null;
+  validFrom: string;
+  validUntil: string;
+  status: VisitStatus;
+  origin: 'RESIDENTE' | 'PORTERIA';
+  residentApprovalConfirmed: boolean;
+  resident: { id: number; fullName: string; apartmentNumber: string } & PersonLocation;
+  visitor: { id: number; fullName: string; documentNumber: string | null } | null;
+  createdBy: { id: number; name: string };
+  accessLogs: { id: number; accessType: 'ENTRADA' | 'SALIDA'; occurredAt: string }[];
+};
 type DeliveryKind = 'COMIDA' | 'PAQUETE' | 'RECIBO' | 'CORREO' | 'OTRO';
 type DeliveryState = 'PENDIENTE' | 'ENTREGADA' | 'DEVUELTA';
 type Delivery = {
@@ -54,13 +73,42 @@ function formatBuildingSection(person: PersonLocation) {
 function formatPersonLocation(person: PersonLocation) {
   return `${formatBuildingSection(person)} · Apto. ${person.apartmentNumber}`;
 }
+function toLocalDateTimeValue(date: Date) {
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 16);
+}
+function endOfLocalDay(value: string) {
+  const date = new Date(value);
+  date.setDate(date.getDate() + 1);
+  date.setHours(0, 0, 0, 0);
+  return toLocalDateTimeValue(date);
+}
+function defaultVisitWindow() {
+  const now = new Date();
+  return {
+    validFrom: toLocalDateTimeValue(now),
+    validUntil: endOfLocalDay(toLocalDateTimeValue(now)),
+  };
+}
+const visitStatusLabels: Record<VisitStatus, string> = {
+  AUTORIZADA: 'Autorizada',
+  CANCELADA: 'Cancelada',
+  NOSHOW: 'No se presentó',
+  EN_CURSO: 'En residencia',
+  COMPLETADA: 'Completada',
+};
 function normalizePersonSearch(value: string) {
   return value.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
-const api = 'http://localhost:4000';
+const api = apiBaseUrl;
 const getToken = () => localStorage.getItem('token') ?? '';
 const sessionExpiredEvent = 'resi-control:session-expired';
 const nativeFetch = window.fetch.bind(window);
+const storedSessionKeys = ['token', 'userRole', 'userId', 'userPermissions', 'availableResidences', 'activeResidenceId'];
+
+function clearStoredSession() {
+  storedSessionKeys.forEach((key) => localStorage.removeItem(key));
+}
 
 async function apiFetch(input: RequestInfo | URL, init?: RequestInit) {
   const headers = new Headers(init?.headers);
@@ -165,6 +213,28 @@ function validatePhoto(file: File) {
   return '';
 }
 
+function PasswordVisibilityButton({ visible, onToggle, label }: { visible: boolean; onToggle: () => void; label: string }) {
+  return <button
+    type="button"
+    className="password-visibility-toggle"
+    aria-label={`${visible ? 'Ocultar' : 'Mostrar'} ${label.toLowerCase()}`}
+    aria-pressed={visible}
+    onClick={onToggle}
+  >
+    {visible ? (
+      <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M3 3l18 18M10.6 10.6a2 2 0 002.8 2.8" />
+        <path d="M9.9 5.2A10.8 10.8 0 0112 5c5 0 8.5 4.5 9.5 7-.4 1.1-1.2 2.3-2.3 3.4M6.2 6.2C3.9 7.6 2.8 9.7 2.5 12c.5 1.4 3.8 7 9.5 7 1.2 0 2.2-.2 3.2-.6" />
+      </svg>
+    ) : (
+      <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M2.5 12S6 5 12 5s9.5 7 9.5 7-3.5 7-9.5 7-9.5-7-9.5-7z" />
+        <circle cx="12" cy="12" r="2.5" />
+      </svg>
+    )}
+  </button>;
+}
+
 function App() {
   const [authenticated, setAuthenticated] = useState(Boolean(localStorage.getItem('token')));
   const [userRole, setUserRole] = useState(localStorage.getItem('userRole') ?? '');
@@ -173,8 +243,16 @@ function App() {
   const [availableResidences, setAvailableResidences] = useState<AvailableResidence[]>(JSON.parse(localStorage.getItem('availableResidences') ?? '[]'));
   const [activeResidenceId, setActiveResidenceId] = useState(localStorage.getItem('activeResidenceId') ?? '');
   const [email, setEmail] = useState('admin@resicontrol.local');
-  const [password, setPassword] = useState('Admin123!');
+  const [password, setPassword] = useState('');
   const [loginError, setLoginError] = useState('');
+  const [loginNotice, setLoginNotice] = useState('');
+  const [invitationToken, setInvitationToken] = useState(() => new URLSearchParams(window.location.hash.slice(1)).get('invite') ?? '');
+  const [activationPassword, setActivationPassword] = useState('');
+  const [activationPasswordConfirmation, setActivationPasswordConfirmation] = useState('');
+  const [showActivationPassword, setShowActivationPassword] = useState(false);
+  const [showActivationPasswordConfirmation, setShowActivationPasswordConfirmation] = useState(false);
+  const [activationError, setActivationError] = useState('');
+  const [activationSaving, setActivationSaving] = useState(false);
   const [logs, setLogs] = useState<Log[]>([]);
   const [people, setPeople] = useState<Person[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
@@ -190,6 +268,7 @@ function App() {
   const [showAccessForm, setShowAccessForm] = useState(false);
   const [personType, setPersonType] = useState<Person['type']>('RESIDENTE');
   const [fullName, setFullName] = useState('');
+  const [personEmail, setPersonEmail] = useState('');
   const [buildingSectionType, setBuildingSectionType] = useState<BuildingSectionType | ''>('');
   const [buildingSectionNumber, setBuildingSectionNumber] = useState('');
   const [apartmentNumber, setApartmentNumber] = useState('');
@@ -242,7 +321,7 @@ function App() {
   const [residenceLogo, setResidenceLogo] = useState<File | null>(null);
   const [residenceLogoPreview, setResidenceLogoPreview] = useState('');
   const [removeResidenceLogo, setRemoveResidenceLogo] = useState(false);
-  const [activeView, setActiveView] = useState<'movements' | 'people' | 'vehicles' | 'deliveries' | 'settings' | 'users'>(() => {
+  const [activeView, setActiveView] = useState<'movements' | 'people' | 'vehicles' | 'deliveries' | 'visits' | 'settings' | 'users'>(() => {
     const storedPermissions: string[] = JSON.parse(localStorage.getItem('userPermissions') ?? '[]');
     if (storedPermissions.includes('ACCESS_VIEW') || storedPermissions.includes('ACCESS_REGISTER')) return 'movements';
     if (storedPermissions.includes('PEOPLE_VIEW')) return 'people';
@@ -252,6 +331,18 @@ function App() {
     return 'settings';
   });
   const [deliveries, setDeliveries] = useState<Delivery[]>([]);
+  const [visits, setVisits] = useState<Visit[]>([]);
+  const [visitSearch, setVisitSearch] = useState('');
+  const [visitVisitorName, setVisitVisitorName] = useState('');
+  const [visitVisitorDocument, setVisitVisitorDocument] = useState('');
+  const [visitObservations, setVisitObservations] = useState('');
+  const [visitVehiclePlate, setVisitVehiclePlate] = useState('');
+  const [visitVehicleType, setVisitVehicleType] = useState<Vehicle['type']>('AUTOMOVIL');
+  const [visitResidentPersonId, setVisitResidentPersonId] = useState('');
+  const [visitResidentApprovalConfirmed, setVisitResidentApprovalConfirmed] = useState(false);
+  const [visitWindow, setVisitWindow] = useState(defaultVisitWindow);
+  const [visitStartEdited, setVisitStartEdited] = useState(false);
+  const [visitEndEdited, setVisitEndEdited] = useState(false);
   const [deliveryFilter, setDeliveryFilter] = useState<'PENDIENTE' | 'DEVUELTA' | 'TODAS'>('PENDIENTE');
   const [showDeliveryForm, setShowDeliveryForm] = useState(false);
   const [deliveryPersonId, setDeliveryPersonId] = useState('');
@@ -304,6 +395,27 @@ function App() {
     if (!response.ok) throw new Error('No se pudieron consultar las encomiendas.');
     setDeliveries(await response.json());
   }
+
+  async function loadVisits() {
+    const response = await apiFetch(`${api}/api/visits`, { headers: { Authorization: 'Bearer ' + token() } });
+    if (!response.ok) throw new Error('No se pudieron consultar las visitas.');
+    setVisits(await response.json());
+  }
+
+  async function loadResidentVisits() {
+    const response = await apiFetch(`${api}/api/resident/visits`, { headers: { Authorization: 'Bearer ' + token() } });
+    if (!response.ok) throw new Error('No se pudieron consultar tus visitas.');
+    setVisits(await response.json());
+  }
+
+  useEffect(() => {
+    if (!authenticated) return;
+    if (userRole === 'RESIDENTE') {
+      loadResidentVisits().catch((reason: unknown) => setError(reason instanceof Error ? reason.message : 'No se pudieron consultar tus visitas.'));
+    } else if ((activeView === 'visits' || activeView === 'movements') && can('ACCESS_VIEW')) {
+      loadVisits().catch((reason: unknown) => setError(reason instanceof Error ? reason.message : 'No se pudieron consultar las visitas.'));
+    }
+  }, [authenticated, userRole, activeView, activeResidenceId]);
 
   async function loadSettings() {
     const response = await apiFetch(`${api}/api/settings/irregular-access`, { headers: { Authorization: `Bearer ${getToken()}` } });
@@ -402,12 +514,7 @@ function App() {
   useEffect(() => {
     const handleSessionExpired = () => {
       if (!localStorage.getItem('token')) return;
-      localStorage.removeItem('token');
-      localStorage.removeItem('userRole');
-      localStorage.removeItem('userId');
-      localStorage.removeItem('userPermissions');
-      localStorage.removeItem('availableResidences');
-      localStorage.removeItem('activeResidenceId');
+      clearStoredSession();
       setAuthenticated(false);
       setUserRole('');
       setCurrentUserId(0);
@@ -477,7 +584,7 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (!authenticated) return;
+    if (!authenticated || userRole === 'RESIDENTE') return;
     const tasks = [loadResidence()];
     if (can('DASHBOARD_VIEW')) tasks.push(loadDashboard());
     if (can('PEOPLE_VIEW')) tasks.push(loadPeople(), loadDocumentTypes());
@@ -485,7 +592,7 @@ function App() {
     if (can('DELIVERIES_VIEW')) tasks.push(loadDeliveries());
     if (can('SETTINGS_VIEW')) tasks.push(loadSettings());
     Promise.all(tasks).catch((reason: Error) => setError(reason.message));
-  }, [authenticated, userPermissions, activeResidenceId]);
+  }, [authenticated, userRole, userPermissions, activeResidenceId]);
 
   useEffect(() => () => {
     scannerControlsRef.current?.stop();
@@ -701,6 +808,7 @@ function App() {
   async function login(event: FormEvent) {
     event.preventDefault();
     setLoginError('');
+    setLoginNotice('');
     setError('');
     setNotice('');
     const response = await apiFetch(`${api}/api/auth/login`, {
@@ -732,6 +840,52 @@ function App() {
     setAuthenticated(true);
   }
 
+  function logout() {
+    clearStoredSession();
+    setAuthenticated(false);
+    setUserRole('');
+    setCurrentUserId(0);
+    setUserPermissions([]);
+    setAvailableResidences([]);
+    setActiveResidenceId('');
+    setPassword('');
+    setLoginError('');
+    setLoginNotice('');
+    setError('');
+    setNotice('');
+  }
+
+  async function activateResident(event: FormEvent) {
+    event.preventDefault();
+    setActivationError('');
+    if (activationPassword !== activationPasswordConfirmation) {
+      setActivationError('Las contraseñas no coinciden.');
+      return;
+    }
+    setActivationSaving(true);
+    try {
+      const response = await apiFetch(`${api}/api/auth/resident-invitation/accept`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: invitationToken, password: activationPassword }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.message ?? 'No se pudo activar la cuenta.');
+      setEmail(data.user.email);
+      setPassword('');
+      setLoginError('');
+      setLoginNotice('Cuenta activada. Inicia sesión con tu nueva contraseña.');
+      setInvitationToken('');
+      window.history.replaceState({}, '', '/');
+      ['token', 'userRole', 'userId', 'userPermissions', 'availableResidences', 'activeResidenceId'].forEach((key) => localStorage.removeItem(key));
+      setAuthenticated(false);
+    } catch (reason) {
+      setActivationError(reason instanceof Error ? reason.message : 'No se pudo activar la cuenta.');
+    } finally {
+      setActivationSaving(false);
+    }
+  }
+
   async function createPerson(event: FormEvent) {
     event.preventDefault();
     setSaving(true); setError(''); setNotice('');
@@ -739,7 +893,7 @@ function App() {
       const response = await apiFetch(`${api}/api/people${editingPersonId ? `/${editingPersonId}` : ''}`, {
         method: editingPersonId ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
-        body: JSON.stringify({ type: personType, fullName, buildingSectionType, buildingSectionNumber, apartmentNumber, documentTypeId: documentTypeId ? Number(documentTypeId) : undefined, documentNumber: documentNumber || undefined, phone: phone || undefined }),
+        body: JSON.stringify({ type: personType, fullName, email: personEmail.trim() || null, buildingSectionType, buildingSectionNumber, apartmentNumber, documentTypeId: documentTypeId ? Number(documentTypeId) : undefined, documentNumber: documentNumber || undefined, phone: phone || undefined }),
       });
       if (!response.ok) {
         const data = await response.json().catch(() => null);
@@ -751,13 +905,100 @@ function App() {
         const photoResponse = await apiFetch(`${api}/api/people/${created.id}/photo`, { method: 'PUT', headers: { Authorization: `Bearer ${getToken()}` }, body });
         if (!photoResponse.ok) throw new Error('La persona se creó, pero no se pudo guardar su foto.');
       }
-      setFullName(''); setBuildingSectionType(''); setBuildingSectionNumber(''); setApartmentNumber(''); setDocumentTypeId(''); setDocumentNumber(''); setPhone(''); setPersonPhoto(null); setPersonPhotoPreview('');
+      setFullName(''); setPersonEmail(''); setBuildingSectionType(''); setBuildingSectionNumber(''); setApartmentNumber(''); setDocumentTypeId(''); setDocumentNumber(''); setPhone(''); setPersonPhoto(null); setPersonPhotoPreview('');
       setShowPersonForm(false); setEditingPersonId(null);
       setNotice(editingPersonId ? 'Persona actualizada correctamente.' : `${personType === 'RESIDENTE' ? 'Residente' : 'Visitante'} registrado correctamente.`);
       await Promise.all([loadDashboard(), loadPeople(), loadDocumentTypes()]);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'No se pudo guardar la persona.');
     } finally { setSaving(false); }
+  }
+
+  async function saveVisit(event: FormEvent) {
+    event.preventDefault();
+    setSaving(true);
+    setError('');
+    setNotice('');
+    try {
+      const currentDefaults = defaultVisitWindow();
+      const validFrom = visitStartEdited ? visitWindow.validFrom : currentDefaults.validFrom;
+      const validUntil = visitEndEdited ? visitWindow.validUntil
+        : visitStartEdited ? endOfLocalDay(validFrom) : currentDefaults.validUntil;
+      setVisitWindow({ validFrom, validUntil });
+      const base = {
+        visitorName: visitVisitorName,
+        visitorDocumentNumber: visitVisitorDocument || undefined,
+        observations: visitObservations.trim() || undefined,
+        vehiclePlate: visitVehiclePlate || undefined,
+        vehicleType: visitVehiclePlate ? visitVehicleType : undefined,
+        validFrom: new Date(validFrom).toISOString(),
+        validUntil: new Date(validUntil).toISOString(),
+      };
+      const isResident = userRole === 'RESIDENTE';
+      const response = await apiFetch(`${api}${isResident ? '/api/resident/visits' : '/api/visits/porter'}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token() },
+        body: JSON.stringify(isResident ? base : {
+          ...base,
+          residentPersonId: Number(visitResidentPersonId),
+          residentApprovalConfirmed: visitResidentApprovalConfirmed,
+        }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.message ?? 'No se pudo registrar la visita.');
+      setVisitVisitorName('');
+      setVisitVisitorDocument('');
+      setVisitObservations('');
+      setVisitVehiclePlate('');
+      setVisitVehicleType('AUTOMOVIL');
+      setVisitResidentPersonId('');
+      setVisitResidentApprovalConfirmed(false);
+      setVisitWindow(defaultVisitWindow());
+      setVisitStartEdited(false);
+      setVisitEndEdited(false);
+      setNotice(isResident ? 'Visita prerregistrada y autorizada.' : 'Visita registrada desde portería con autorización del residente confirmada.');
+      if (isResident) await loadResidentVisits();
+      else await loadVisits();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'No se pudo registrar la visita.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function cancelVisit(visit: Visit) {
+    if (!window.confirm(`¿Cancelar la visita de ${visit.visitorName}?`)) return;
+    setError('');
+    setNotice('');
+    try {
+      const response = await apiFetch(`${api}/api/resident/visits/${visit.id}/cancel`, {
+        method: 'PATCH',
+        headers: { Authorization: 'Bearer ' + token() },
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.message ?? 'No se pudo cancelar la visita.');
+      await loadResidentVisits();
+      setNotice('Visita cancelada.');
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'No se pudo cancelar la visita.');
+    }
+  }
+
+  async function updateVisitAccess(visit: Visit, action: 'check-in' | 'check-out') {
+    setError('');
+    setNotice('');
+    try {
+      const response = await apiFetch(`${api}/api/visits/${visit.id}/${action}`, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + token() },
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.message ?? 'No se pudo actualizar el acceso de la visita.');
+      await Promise.all([loadVisits(), loadDashboard(), loadPeople(), loadVehicles()]);
+      setNotice(action === 'check-in' ? 'Entrada de visita registrada.' : 'Salida de visita registrada.');
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'No se pudo actualizar el acceso de la visita.');
+    }
   }
 
   async function createAccess(event: FormEvent) {
@@ -851,6 +1092,16 @@ function App() {
     normalizePersonSearch(`${vehicle.plate} ${vehicle.person.fullName} ${formatPersonLocation(vehicle.person)}`)
       .includes(normalizePersonSearch(vehicleSearch.trim())),
   );
+  const matchingVisits = visits.filter((visit) =>
+    normalizePersonSearch([
+      visit.visitorName,
+      visit.visitorDocumentNumber ?? '',
+      visit.vehiclePlate ?? '',
+      visit.resident.fullName,
+      visit.resident.apartmentNumber,
+    ].join(' ')).includes(normalizePersonSearch(visitSearch.trim())),
+  );
+  const activeVisits = visits.filter((visit) => visit.status === 'EN_CURSO');
 
   async function createDelivery(event: FormEvent) {
     event.preventDefault();
@@ -922,6 +1173,7 @@ function App() {
     setEditingPersonId(person.id);
     setPersonType(person.type);
     setFullName(person.fullName);
+    setPersonEmail(person.email ?? '');
     setBuildingSectionType(person.buildingSectionType ?? '');
     setBuildingSectionNumber(person.buildingSectionNumber ?? '');
     setApartmentNumber(person.apartmentNumber);
@@ -1005,17 +1257,55 @@ function App() {
     finally { setSaving(false); }
   }
 
+  if (invitationToken) return <main className="login-page"><form className="login-card" onSubmit={activateResident}>
+    <span className="eyebrow">RESI CONTROL</span><h1>Activa tu cuenta</h1><p>Crea una contraseña para acceder como residente.</p>
+    <label>Nueva contraseña<div className="password-input-wrap"><input type={showActivationPassword ? 'text' : 'password'} autoComplete="new-password" minLength={12} maxLength={128} required value={activationPassword} onChange={(event) => setActivationPassword(event.target.value)} /><PasswordVisibilityButton visible={showActivationPassword} onToggle={() => setShowActivationPassword((visible) => !visible)} label="nueva contraseña" /></div></label>
+    <label>Confirma la contraseña<div className="password-input-wrap"><input type={showActivationPasswordConfirmation ? 'text' : 'password'} autoComplete="new-password" minLength={12} maxLength={128} required value={activationPasswordConfirmation} onChange={(event) => setActivationPasswordConfirmation(event.target.value)} /><PasswordVisibilityButton visible={showActivationPasswordConfirmation} onToggle={() => setShowActivationPasswordConfirmation((visible) => !visible)} label="confirmación de contraseña" /></div></label>
+    {activationError && <div className="notice">{activationError}</div>}<button disabled={activationSaving} type="submit">{activationSaving ? 'Activando...' : 'Activar cuenta'}</button>
+    <button className="secondary" type="button" onClick={() => { setInvitationToken(''); window.history.replaceState({}, '', '/'); }}>Volver al inicio de sesión</button>
+  </form></main>;
+
+  if (authenticated && userRole === 'RESIDENTE') return <main className="resident-portal">
+    <header><div><span className="eyebrow">RESI CONTROL</span><h1>Portal de residente</h1><p>Prerregistra y administra tus visitas.</p>    </div><button type="button" className="secondary" onClick={logout}>Cerrar sesión</button></header>
+    {error && <div className="notice">{error}</div>}
+    {notice && <div className="success">{notice}</div>}
+    <section className="form-panel">
+      <div className="panel-heading"><div><span className="eyebrow">NUEVA AUTORIZACIÓN</span><h2>Prerregistrar visita</h2></div></div>
+      <p className="form-full visit-help">Al prerregistrar, autorizas la visita para la vigencia indicada. Por defecto es desde ahora hasta la medianoche de hoy; puedes editar ambos horarios. También puedes cancelar una visita que todavía no haya ingresado.</p>
+      <form className="form-grid" onSubmit={saveVisit}>
+        <label>Nombre del visitante<input required minLength={2} maxLength={120} value={visitVisitorName} onChange={(event) => setVisitVisitorName(event.target.value)} /></label>
+        <label>Documento (opcional)<input maxLength={40} value={visitVisitorDocument} onChange={(event) => setVisitVisitorDocument(event.target.value)} /></label>
+        <label className="form-full">Observaciones (opcional)<textarea rows={3} maxLength={500} value={visitObservations} onChange={(event) => setVisitObservations(event.target.value)} placeholder="Comentario adicional sobre la visita" /></label>
+        <label>Válida desde<input type="datetime-local" required value={visitWindow.validFrom} onChange={(event) => { setVisitStartEdited(true); setVisitWindow((current) => ({ validFrom: event.target.value, validUntil: visitEndEdited ? current.validUntil : endOfLocalDay(event.target.value) })); }} /></label>
+        <label>Válida hasta<input type="datetime-local" required min={visitWindow.validFrom} value={visitWindow.validUntil} onChange={(event) => { setVisitEndEdited(true); setVisitWindow((current) => ({ ...current, validUntil: event.target.value })); }} /></label>
+        <label>Placa del vehículo (opcional)<input maxLength={10} value={visitVehiclePlate} onChange={(event) => setVisitVehiclePlate(event.target.value.toUpperCase())} /></label>
+        {visitVehiclePlate && <label>Tipo de vehículo<select value={visitVehicleType} onChange={(event) => setVisitVehicleType(event.target.value as Vehicle['type'])}><option value="AUTOMOVIL">Automóvil</option><option value="MOTOCICLETA">Motocicleta</option><option value="BICICLETA">Bicicleta</option><option value="OTRO">Otro</option></select></label>}
+        <button disabled={saving} type="submit">{saving ? 'Guardando...' : 'Autorizar visita'}</button>
+      </form>
+    </section>
+    <section className="panel visit-panel">
+      <div className="panel-heading"><div><span className="eyebrow">HISTORIAL</span><h2>Tus visitas</h2></div></div>
+      {visits.length ? <div className="table"><div className="row resident-visit-row heading"><span>Visitante</span><span>Vigencia</span><span>Estado</span><span>Acción</span></div>{visits.map((visit) => <div className="row resident-visit-row" key={visit.id}>
+        <strong>{visit.visitorName}{visit.visitorDocumentNumber ? <small>Documento: {visit.visitorDocumentNumber}</small> : null}{visit.vehiclePlate ? <small>Vehículo: {visit.vehiclePlate}</small> : null}{visit.observations ? <small>Observaciones: {visit.observations}</small> : null}</strong>
+        <span>{new Date(visit.validFrom).toLocaleString()} – {new Date(visit.validUntil).toLocaleString()}</span>
+        <span>{visitStatusLabels[visit.status]}</span>
+        <span>{visit.status === 'AUTORIZADA' && <button type="button" className="small-button secondary" onClick={() => void cancelVisit(visit)}>Cancelar</button>}</span>
+      </div>)}</div> : <div className="empty">Todavía no tienes visitas prerregistradas.</div>}
+    </section>
+  </main>;
+
   if (!authenticated) return <main className="login-page"><form className="login-card" onSubmit={login}>
     <span className="eyebrow">RESI CONTROL</span><h1>Iniciar sesión</h1><p>Ingresa para administrar el acceso residencial.</p>
     <label>Correo<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label>
     <label>Contraseña<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
-    {loginError && <div className="notice">{loginError}</div>}<button type="submit">Ingresar</button>
+    {loginError && <div className="notice">{loginError}</div>}{loginNotice && <div className="success">{loginNotice}</div>}<button type="submit">Ingresar</button>
   </form></main>;
 
   return <main>
     <header><div className="brand"><div className="residence-logo">{residenceLogoUrl ? <img src={residenceLogoUrl} alt={`Logo de ${residence?.name ?? 'la residencia'}`} /> : <span>RC</span>}</div><div><span className="eyebrow">RESI CONTROL</span><h1>{residence?.name ?? 'Control de acceso'}</h1><p>Supervisión del conjunto residencial en tiempo real.</p></div></div><div className="header-controls">
       {userRole === 'SUPER_ADMINISTRADOR' && <label className="residence-selector">Residencia<select aria-label="Residencia activa" value={activeResidenceId} onChange={(event) => { const selected = event.target.value; localStorage.setItem('activeResidenceId', selected); setActiveResidenceId(selected); }}><option value="">Selecciona residencia</option>{availableResidences.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>}
-      <div className="actions">{(can('ACCESS_VIEW') || can('ACCESS_REGISTER')) && <button className={activeView === 'movements' ? 'active-nav' : ''} onClick={() => { setActiveView('movements'); setShowAccessForm(false); }}>Movimientos</button>}{can('PEOPLE_VIEW') && <button className={activeView === 'people' ? 'active-nav' : ''} onClick={() => { setActiveView('people'); setShowAccessForm(false); }}>Personas</button>}{can('VEHICLES_VIEW') && <button className={activeView === 'vehicles' ? 'active-nav' : ''} onClick={() => { setActiveView('vehicles'); setShowAccessForm(false); }}>Vehículos</button>}{can('DELIVERIES_VIEW') && <button className={activeView === 'deliveries' ? 'active-nav' : ''} onClick={() => { setActiveView('deliveries'); setShowAccessForm(false); }}>Encomiendas{totals.pendingDeliveries ? ` · ${totals.pendingDeliveries}` : ''}</button>}{can('SETTINGS_MANAGE') && <button className={activeView === 'settings' ? 'active-nav' : ''} onClick={() => { setActiveView('settings'); setShowSettings(true); }}>Configuración</button>}{can('USERS_MANAGE') && <button className={activeView === 'users' ? 'active-nav' : ''} onClick={() => setActiveView('users')}>Usuarios y roles</button>}</div>
+      <div className="actions">{(can('ACCESS_VIEW') || can('ACCESS_REGISTER')) && <button className={activeView === 'movements' ? 'active-nav' : ''} onClick={() => { setActiveView('movements'); setShowAccessForm(false); }}>Movimientos</button>}{can('ACCESS_VIEW') && <button className={activeView === 'visits' ? 'active-nav' : ''} onClick={() => setActiveView('visits')}>Visitas</button>}{can('PEOPLE_VIEW') && <button className={activeView === 'people' ? 'active-nav' : ''} onClick={() => { setActiveView('people'); setShowAccessForm(false); }}>Personas</button>}{can('VEHICLES_VIEW') && <button className={activeView === 'vehicles' ? 'active-nav' : ''} onClick={() => { setActiveView('vehicles'); setShowAccessForm(false); }}>Vehículos</button>}{can('DELIVERIES_VIEW') && <button className={activeView === 'deliveries' ? 'active-nav' : ''} onClick={() => { setActiveView('deliveries'); setShowAccessForm(false); }}>Encomiendas{totals.pendingDeliveries ? ` · ${totals.pendingDeliveries}` : ''}</button>}{can('SETTINGS_MANAGE') && <button className={activeView === 'settings' ? 'active-nav' : ''} onClick={() => { setActiveView('settings'); setShowSettings(true); }}>Configuración</button>}{can('USERS_MANAGE') && <button className={activeView === 'users' ? 'active-nav' : ''} onClick={() => setActiveView('users')}>Usuarios y roles</button>}</div>
+      <button type="button" className="secondary" onClick={logout}>Cerrar sesión</button>
     </div></header>
     {error && <div className="notice">{error}</div>}
     {notice && <div className="success">{notice}</div>}
@@ -1053,6 +1343,7 @@ function App() {
     {activeView === 'people' && showPersonForm && can('PEOPLE_MANAGE') && <div className="modal-backdrop" onClick={() => { setShowPersonForm(false); setEditingPersonId(null); }}><section className="form-panel modal-panel" onClick={(event) => event.stopPropagation()}><div className="panel-heading"><div><span className="eyebrow">{editingPersonId ? 'EDITAR REGISTRO' : 'NUEVO REGISTRO'}</span><h2>{editingPersonId ? 'Editar persona' : 'Registrar persona'}</h2></div><button type="button" className="secondary" onClick={() => { setShowPersonForm(false); setEditingPersonId(null); }}>Cerrar</button></div><form className="form-grid" onSubmit={createPerson}>
       <label>Tipo<select value={personType} onChange={(event) => setPersonType(event.target.value as Person['type'])}><option value="RESIDENTE">Residente</option><option value="VISITANTE">Visitante</option></select></label>
       <label>Nombre completo<input required value={fullName} onChange={(event) => setFullName(event.target.value)} /></label>
+      {personType === 'RESIDENTE' && <label>Correo electrónico<input type="email" maxLength={254} value={personEmail} onChange={(event) => setPersonEmail(event.target.value)} /></label>}
       <div style={{ gridColumn: '1 / -1', fontWeight: 700 }}>Ubicación residencial</div>
       <label>Tipo de sector<select required value={buildingSectionType} onChange={(event) => setBuildingSectionType(event.target.value as BuildingSectionType | '')}><option value="">Selecciona Torre o interior</option><option value="TORRE">Torre</option><option value="INTERIOR">Interior</option></select></label>
       <label>Número de torre o interior<input required maxLength={30} value={buildingSectionNumber} onChange={(event) => setBuildingSectionNumber(event.target.value)} placeholder="7" /></label>
@@ -1078,7 +1369,7 @@ function App() {
       <article><span>Movimientos de hoy</span><strong>{totals.today}</strong><small>Entradas y salidas</small></article>
       <article><span>Encomiendas pendientes</span><strong>{totals.pendingDeliveries}</strong><small>Por entregar a residentes</small></article>
     </section>}
-    {activeView === 'people' && can('PEOPLE_VIEW') && <section className="panel vehicle-panel"><div className="panel-heading"><div><span className="eyebrow">PERSONAS</span><h2>Personas registradas</h2></div><div className="panel-actions"><span>{people.length} activas</span>{can('PEOPLE_MANAGE') && <button onClick={() => setShowPersonForm(true)}>Registrar persona</button>}</div></div>
+    {activeView === 'people' && can('PEOPLE_VIEW') && <section className="panel vehicle-panel"><div className="panel-heading"><div><span className="eyebrow">PERSONAS</span><h2>Personas registradas</h2></div><div className="panel-actions"><span>{people.length} activas</span>{can('PEOPLE_MANAGE') && <button onClick={() => { setEditingPersonId(null); setPersonEmail(''); setShowPersonForm(true); }}>Registrar persona</button>}</div></div>
       {people.length ? <div className="table"><div className="row people-row heading"><span>Nombre</span><span>Tipo</span><span>Ubicación</span><span>Documento</span><span>Acciones</span></div>{people.map((person) => <div className="row people-row record-clickable" key={person.id} role="button" tabIndex={0} onClick={() => setSelectedPerson(person)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') setSelectedPerson(person); }}><div className="person-summary">{person.photoUrl && <img className="person-thumbnail" src={person.photoUrl} alt={`Foto de ${person.fullName}`} />}<strong>{person.fullName}</strong></div><span>{person.type === 'RESIDENTE' ? 'Residente' : 'Visitante'}</span><span>{formatPersonLocation(person)}</span><span>{person.documentNumber || 'No registrado'}</span>{can('PEOPLE_MANAGE') && <button type="button" className="small-button" onClick={(event) => { event.stopPropagation(); editPerson(person); }}>Editar</button>}</div>)}</div> : <div className="empty">Aún no hay personas registradas.</div>}
     </section>}
     {activeView === 'vehicles' && can('VEHICLES_VIEW') && <section className="panel vehicle-panel"><div className="panel-heading"><div><span className="eyebrow">INVENTARIO</span><h2>Vehículos registrados</h2></div><div className="panel-actions"><span>{vehicles.length} activos</span>{can('VEHICLES_MANAGE') && <button onClick={() => setShowVehicleForm(true)}>Registrar vehículo</button>}</div></div>
@@ -1102,16 +1393,52 @@ function App() {
       <label>¿Quién recibe la encomienda?<input required maxLength={120} value={deliveredToName} onChange={(event) => setDeliveredToName(event.target.value)} placeholder="Nombre de quien retira" /></label>
       <button disabled={saving} type="submit">{saving ? 'Guardando...' : 'Confirmar entrega'}</button>
     </form></section></div>}
+    {activeView === 'visits' && (can('ACCESS_VIEW') || can('ACCESS_REGISTER')) && <section className="panel vehicle-panel">
+      <div className="panel-heading"><div><span className="eyebrow">PORTERÍA</span><h2>Control de visitas</h2></div></div>
+      {can('ACCESS_REGISTER') && <div className="visit-registration">
+        <p>Si la visita llegó sin prerregistro, contacta al residente por el proceso habitual. Solo después de que confirme la autorización, registra aquí la visita; el sistema dejará constancia de que se originó en portería.</p>
+        <form className="form-grid" onSubmit={saveVisit}>
+          <label>Residente que autoriza<select required value={visitResidentPersonId} onChange={(event) => setVisitResidentPersonId(event.target.value)}><option value="">Selecciona un residente</option>{people.filter((person) => person.type === 'RESIDENTE').map((person) => <option key={person.id} value={person.id}>{person.fullName} · {formatPersonLocation(person)}</option>)}</select></label>
+          <label className="checkbox-field visit-approval"><input type="checkbox" required checked={visitResidentApprovalConfirmed} onChange={(event) => setVisitResidentApprovalConfirmed(event.target.checked)} /> Confirmo que el residente autorizó esta visita fuera del sistema (por ejemplo, por llamada).</label>
+          <label>Nombre del visitante<input required minLength={2} maxLength={120} value={visitVisitorName} onChange={(event) => setVisitVisitorName(event.target.value)} /></label>
+          <label>Documento (opcional)<input maxLength={40} value={visitVisitorDocument} onChange={(event) => setVisitVisitorDocument(event.target.value)} /></label>
+          <label className="form-full">Observaciones (opcional)<textarea rows={3} maxLength={500} value={visitObservations} onChange={(event) => setVisitObservations(event.target.value)} placeholder="Comentario adicional sobre la visita" /></label>
+          <label>Válida desde<input type="datetime-local" required value={visitWindow.validFrom} onChange={(event) => { setVisitStartEdited(true); setVisitWindow((current) => ({ validFrom: event.target.value, validUntil: visitEndEdited ? current.validUntil : endOfLocalDay(event.target.value) })); }} /></label>
+          <label>Válida hasta<input type="datetime-local" required min={visitWindow.validFrom} value={visitWindow.validUntil} onChange={(event) => { setVisitEndEdited(true); setVisitWindow((current) => ({ ...current, validUntil: event.target.value })); }} /></label>
+          <label>Placa del vehículo (opcional)<input maxLength={10} value={visitVehiclePlate} onChange={(event) => setVisitVehiclePlate(event.target.value.toUpperCase())} /></label>
+          {visitVehiclePlate && <label>Tipo de vehículo<select value={visitVehicleType} onChange={(event) => setVisitVehicleType(event.target.value as Vehicle['type'])}><option value="AUTOMOVIL">Automóvil</option><option value="MOTOCICLETA">Motocicleta</option><option value="BICICLETA">Bicicleta</option><option value="OTRO">Otro</option></select></label>}
+          <button disabled={saving || !visitResidentApprovalConfirmed || !visitResidentPersonId} type="submit">{saving ? 'Guardando...' : 'Registrar visita autorizada'}</button>
+        </form>
+      </div>}
+      <label className="visit-search">Buscar visita<input type="search" aria-label="Buscar visita por nombre o documento" value={visitSearch} onChange={(event) => setVisitSearch(event.target.value)} placeholder="Buscar por nombre, documento o placa" /></label>
+      {matchingVisits.length ? <div className="table"><div className="row staff-visit-row heading"><span>Visitante</span><span>Residente</span><span>Origen / vigencia</span><span>Estado / acción</span></div>{matchingVisits.map((visit) => <div className="row staff-visit-row" key={visit.id}>
+        <strong>{visit.visitorName}{visit.visitorDocumentNumber ? <small>Documento: {visit.visitorDocumentNumber}</small> : null}{visit.vehiclePlate ? <small>Vehículo: {visit.vehiclePlate}</small> : null}{visit.observations ? <small>Observaciones: {visit.observations}</small> : null}</strong>
+        <span>{visit.resident.fullName} · Apto. {visit.resident.apartmentNumber}</span>
+        <span>{visit.origin === 'PORTERIA' ? `Portería · autorización confirmada por ${visit.createdBy.name}` : 'Prerregistro del residente'}<small>{new Date(visit.validFrom).toLocaleString()} – {new Date(visit.validUntil).toLocaleString()}</small></span>
+        <span>{visitStatusLabels[visit.status]}{visit.status === 'AUTORIZADA' && Date.now() >= Date.parse(visit.validFrom) && Date.now() < Date.parse(visit.validUntil) && can('ACCESS_REGISTER') && <button type="button" className="small-button" onClick={() => void updateVisitAccess(visit, 'check-in')}>Registrar entrada</button>}{visit.status === 'EN_CURSO' && can('ACCESS_REGISTER') && <button type="button" className="small-button secondary" onClick={() => void updateVisitAccess(visit, 'check-out')}>Registrar salida</button>}</span>
+      </div>)}</div> : <div className="empty">{visitSearch.trim() ? 'No se encontraron visitas con ese nombre, documento o placa.' : 'No hay visitas registradas.'}</div>}
+    </section>}
     {activeView === 'users' && can('USERS_MANAGE') && <UserAdministration canManageRoles={can('ROLES_MANAGE')} isSuperAdmin={userRole === 'SUPER_ADMINISTRADOR'} currentUserId={currentUserId} />}
     {activeView === 'movements' && can('ACCESS_VIEW') && <section className="panel"><div className="panel-heading"><div><span className="eyebrow">ACTIVIDAD</span><h2>Últimos movimientos</h2></div><div className="panel-actions"><span className="live">● En vivo</span>{can('ACCESS_REGISTER') && <button onClick={openAccessForm}>Registrar acceso</button>}</div></div>
       {logs.length ? <div className="table"><div className="row movement-row heading"><span>Persona responsable</span><span>Ubicación</span><span>Vehículo</span><span>Movimiento</span><span>Hora</span></div>{logs.map((log) => <div className="row movement-row movement-row-clickable" key={log.id} role="button" tabIndex={0} onClick={() => setSelectedLog(log)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') setSelectedLog(log); }}><strong>{log.person.fullName}</strong><span>{formatPersonLocation(log.person)}</span><span>{log.vehicle ? `${log.vehicle.plate} · Vehículo` : 'Peatonal'}</span><span className={log.accessType === 'ENTRADA' ? 'entry' : 'exit'}>{log.accessType === 'ENTRADA' ? 'Entrada' : 'Salida'}</span><span>{new Date(log.occurredAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></div>)}</div> : <div className="empty">Aún no hay movimientos registrados.</div>}
+    </section>}
+    {activeView === 'movements' && can('ACCESS_VIEW') && <section className="panel visit-panel"><div className="panel-heading"><div><span className="eyebrow">VISITANTES</span><h2>Visitantes dentro de la residencia</h2></div></div>
+      {activeVisits.length ? <div className="table"><div className="row staff-visit-row heading"><span>Visitante</span><span>Residente</span><span>Entrada</span><span>Acción</span></div>{activeVisits.map((visit) => {
+        const entry = visit.accessLogs.find((log) => log.accessType === 'ENTRADA');
+        return <div className="row staff-visit-row" key={visit.id}>
+          <strong>{visit.visitorName}{visit.visitorDocumentNumber ? <small>Documento: {visit.visitorDocumentNumber}</small> : null}{visit.vehiclePlate ? <small>Vehículo: {visit.vehiclePlate}</small> : null}</strong>
+          <span>{visit.resident.fullName} · {formatPersonLocation(visit.resident)}</span>
+          <span>{entry ? new Date(entry.occurredAt).toLocaleString() : 'Sin hora registrada'}</span>
+          <span>{can('ACCESS_REGISTER') && <button type="button" className="small-button secondary" onClick={() => void updateVisitAccess(visit, 'check-out')}>Registrar salida</button>}</span>
+        </div>;
+      })}</div> : <div className="empty">No hay visitantes registrados dentro de la residencia.</div>}
     </section>}
     {selectedLog && <div className="detail-backdrop" onClick={() => setSelectedLog(null)}><section className="movement-detail" role="dialog" aria-modal="true" aria-labelledby="movement-detail-title" onClick={(event) => event.stopPropagation()}>
       <div className="panel-heading"><div><span className="eyebrow">DETALLE DEL MOVIMIENTO</span><h2 id="movement-detail-title">{selectedLog.accessType === 'ENTRADA' ? 'Entrada' : 'Salida'} · {new Date(selectedLog.occurredAt).toLocaleString()}</h2></div><button className="secondary" onClick={() => setSelectedLog(null)}>Cerrar</button></div>
       <div className="detail-grid"><div className="detail-card"><h3>Persona</h3>{selectedPersonPhoto ? <img className="detail-photo" src={selectedPersonPhoto} alt={`Foto de ${selectedLog.person.fullName}`} /> : <div className="detail-photo-placeholder">Sin foto</div>}<p><strong>{selectedLog.person.fullName}</strong></p><p>{selectedLog.person.type === 'VISITANTE' ? 'Visitante' : 'Residente'} · {formatPersonLocation(selectedLog.person)}</p><p>Documento: {selectedLog.person.documentNumber || 'No registrado'}</p><p>Teléfono: {selectedLog.person.phone || 'No registrado'}</p></div>
         <div className="detail-card"><h3>Vehículo</h3>{selectedLog.vehicle ? <><div className="detail-photo-wrap">{selectedVehiclePhoto ? <img className="detail-photo" src={selectedVehiclePhoto} alt={`Foto del vehículo ${selectedLog.vehicle.plate}`} /> : <div className="detail-photo-placeholder">Sin foto</div>}</div><p><strong>{selectedLog.vehicle.plate}</strong></p><p>Tipo: {selectedLog.vehicle.type === 'AUTOMOVIL' ? 'Automóvil' : selectedLog.vehicle.type === 'MOTOCICLETA' ? 'Motocicleta' : selectedLog.vehicle.type === 'BICICLETA' ? 'Bicicleta' : 'Otro'}</p><p>Marca: {selectedLog.vehicle.brand || 'No registrada'}</p><p>Modelo: {selectedLog.vehicle.model || 'No registrado'}</p><p>Color: {selectedLog.vehicle.color || 'No registrado'}</p></> : <div className="empty">Este movimiento no está asociado a un vehículo.</div>}</div></div>
     </section></div>}
-    {selectedPerson && <div className="detail-backdrop" onClick={() => setSelectedPerson(null)}><section className="movement-detail" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}><div className="panel-heading"><div><span className="eyebrow">DETALLE DE PERSONA</span><h2>{selectedPerson.fullName}</h2></div><button className="secondary" onClick={() => setSelectedPerson(null)}>Cerrar</button></div><div className="detail-grid"><div className="detail-card">{selectedPerson.photoUrl ? <img className="detail-photo" src={selectedPerson.photoUrl} alt={`Foto de ${selectedPerson.fullName}`} /> : <div className="detail-photo-placeholder">Sin foto</div>}<p><strong>{selectedPerson.type === 'RESIDENTE' ? 'Residente' : 'Visitante'}</strong></p><p>Sector: {formatBuildingSection(selectedPerson)}</p><p>Apartamento: {selectedPerson.apartmentNumber}</p><p>Documento: {selectedPerson.documentType?.code || 'No registrado'} {selectedPerson.documentNumber || ''}</p><p>Teléfono: {selectedPerson.phone || 'No registrado'}</p></div><div className="detail-card"><h3>Acciones</h3>{can('PEOPLE_MANAGE') && <><button onClick={() => { setSelectedPerson(null); editPerson(selectedPerson); }}>Editar persona</button><label className="file-button detail-file-button">Subir o reemplazar foto<input type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" onChange={async (event) => { const file = event.target.files?.[0] ?? null; await uploadPhoto('people', selectedPerson.id, file); if (file) setSelectedPerson({ ...selectedPerson, photoUrl: URL.createObjectURL(file) }); }} /></label>{selectedPerson.photoUrl && <button className="small-button danger-button" onClick={async () => { await deletePersonPhoto(selectedPerson.id); setSelectedPerson({ ...selectedPerson, photoUrl: null }); }}>Eliminar foto</button>}</>}<AccessCodeCard code={selectedPerson.accessCode} label="Código de la persona" /></div></div></section></div>}
+    {selectedPerson && <div className="detail-backdrop" onClick={() => setSelectedPerson(null)}><section className="movement-detail" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}><div className="panel-heading"><div><span className="eyebrow">DETALLE DE PERSONA</span><h2>{selectedPerson.fullName}</h2></div><button className="secondary" onClick={() => setSelectedPerson(null)}>Cerrar</button></div><div className="detail-grid"><div className="detail-card">{selectedPerson.photoUrl ? <img className="detail-photo" src={selectedPerson.photoUrl} alt={`Foto de ${selectedPerson.fullName}`} /> : <div className="detail-photo-placeholder">Sin foto</div>}<p><strong>{selectedPerson.type === 'RESIDENTE' ? 'Residente' : 'Visitante'}</strong></p><p>Sector: {formatBuildingSection(selectedPerson)}</p><p>Apartamento: {selectedPerson.apartmentNumber}</p><p>Documento: {selectedPerson.documentType?.code || 'No registrado'} {selectedPerson.documentNumber || ''}</p><p>Teléfono: {selectedPerson.phone || 'No registrado'}</p>{selectedPerson.type === 'RESIDENTE' && <p>Correo: {selectedPerson.email || 'No registrado'}</p>}</div><div className="detail-card"><h3>Acciones</h3>{can('PEOPLE_MANAGE') && <><button onClick={() => { setSelectedPerson(null); editPerson(selectedPerson); }}>Editar persona</button><label className="file-button detail-file-button">Subir o reemplazar foto<input type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" onChange={async (event) => { const file = event.target.files?.[0] ?? null; await uploadPhoto('people', selectedPerson.id, file); if (file) setSelectedPerson({ ...selectedPerson, photoUrl: URL.createObjectURL(file) }); }} /></label>{selectedPerson.photoUrl && <button className="small-button danger-button" onClick={async () => { await deletePersonPhoto(selectedPerson.id); setSelectedPerson({ ...selectedPerson, photoUrl: null }); }}>Eliminar foto</button>}</>}<AccessCodeCard code={selectedPerson.accessCode} label="Código de la persona" /></div></div></section></div>}
     {selectedVehicle && <div className="detail-backdrop" onClick={() => setSelectedVehicle(null)}><section className="movement-detail" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}><div className="panel-heading"><div><span className="eyebrow">DETALLE DE VEHÍCULO</span><h2>{selectedVehicle.plate}</h2></div><button className="secondary" onClick={() => setSelectedVehicle(null)}>Cerrar</button></div><div className="detail-grid"><div className="detail-card">{selectedVehicle.photoUrl ? <img className="detail-photo" src={selectedVehicle.photoUrl} alt={`Foto del vehículo ${selectedVehicle.plate}`} /> : <div className="detail-photo-placeholder">Sin foto</div>}<p><strong>{selectedVehicle.type === 'AUTOMOVIL' ? 'Automóvil' : selectedVehicle.type === 'MOTOCICLETA' ? 'Motocicleta' : selectedVehicle.type === 'BICICLETA' ? 'Bicicleta' : 'Otro'}</strong></p><p>Marca: {selectedVehicle.brand || 'No registrada'}</p><p>Modelo: {selectedVehicle.model || 'No registrado'}</p><p>Color: {selectedVehicle.color || 'No registrado'}</p><p>Propietario: {selectedVehicle.person.fullName}</p><p>Ubicación: {formatPersonLocation(selectedVehicle.person)}</p></div><div className="detail-card"><h3>Acciones</h3>{can('VEHICLES_MANAGE') && <><button onClick={() => { setSelectedVehicle(null); editVehicle(selectedVehicle); }}>Editar vehículo</button><label className="file-button detail-file-button">Subir o reemplazar foto<input type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" onChange={async (event) => { const file = event.target.files?.[0] ?? null; await uploadPhoto('vehicles', selectedVehicle.id, file); if (file) setSelectedVehicle({ ...selectedVehicle, photoUrl: URL.createObjectURL(file) }); }} /></label>{selectedVehicle.photoUrl && <button className="small-button danger-button" onClick={async () => { await deleteVehiclePhoto(selectedVehicle.id); setSelectedVehicle({ ...selectedVehicle, photoUrl: null }); }}>Eliminar foto</button>}</>}<AccessCodeCard code={selectedVehicle.accessCode} label="Código del vehículo" /></div></div></section></div>}
   </main>;
 }
