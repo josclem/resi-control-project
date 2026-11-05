@@ -4,7 +4,18 @@ import multer from 'multer';
 import cors from 'cors';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
-import { AccessType, PersonType, PrismaClient, UserRole, DeliveryStatus } from '@prisma/client';
+import {
+  AccessType,
+  DeliveryStatus,
+  PersonType,
+  Prisma,
+  PrismaClient,
+  ResidentCommunicationDeliveryStatus,
+  ResidentCommunicationStatus,
+  ResidentCommunicationType,
+  ResidentEmailConsentAction,
+  UserRole,
+} from '@prisma/client';
 import { z } from 'zod';
 import { Permission, permissions, permissionsForRole } from './permissions.js';
 import {
@@ -21,6 +32,10 @@ import {
   residentInvitationAcceptanceSchema,
   residentInvitationSchema,
   residentVisitCreateSchema,
+  residentCommunicationCreateSchema,
+  residentCommunicationResidentFilterSchema,
+  residentEmailConsentSchema,
+  residentEmailUnsubscribeSchema,
   residenceSchema,
   supervisorSchema,
   vehicleSchema,
@@ -32,6 +47,7 @@ import {
   normalizeDocumentNumber,
 } from './validation.js';
 import { createResidentInvitationMailer, ResidentInvitationMailer } from './resident-invitation-email.js';
+import { createResidentCommunicationMailer, ResidentCommunicationMailer } from './resident-communication-email.js';
 
 type AuthenticatedRequest = Request & { user?: { id: number; role: UserRole; residenceId: number; residentPersonId: number | null; permissions: Permission[]; roleName: string } };
 
@@ -103,6 +119,7 @@ export function createApp(
   prisma: PrismaClient,
   jwtSecret: string,
   residentInvitationMailer: ResidentInvitationMailer = createResidentInvitationMailer(),
+  residentCommunicationMailer: ResidentCommunicationMailer = createResidentCommunicationMailer(),
 ) {
   if (!jwtSecret) throw new Error('JWT_SECRET es obligatorio');
 
@@ -111,6 +128,7 @@ export function createApp(
 
   app.use(cors({ origin: process.env.WEB_ORIGIN ?? 'http://localhost:5173' }));
   app.use(express.json());
+  app.use(express.urlencoded({ extended: false }));
   app.use((_req, res, next) => {
     // Los datos de la API cambian (códigos de acceso, movimientos) y no deben servirse desde caché.
     res.setHeader('Cache-Control', 'no-store');
@@ -135,7 +153,36 @@ app.put('/api/people/:id', requireAuth, requirePermission('PEOPLE_MANAGE'), asyn
     if (!existing) return res.status(404).json({ message: 'Persona no encontrada.' });
     const documentNumber = input.documentNumber ? normalizeDocumentNumber(input.documentNumber) : undefined;
     const phone = input.phone ? formatPhone(input.phone) : undefined;
-    return res.json(await prisma.person.update({ where: { id }, data: { ...input, documentNumber, phone }, include: { documentType: true } }));
+    const nextEmail = input.email === undefined ? existing.email : input.email;
+    const emailChanged = (existing.email ?? '').trim().toLowerCase() !== (nextEmail ?? '').trim().toLowerCase();
+    const consentWithdrawn = existing.type === PersonType.RESIDENTE && emailChanged && existing.promotionalEmailConsentAt;
+    const updateData = {
+      ...input,
+      documentNumber,
+      phone,
+      ...(consentWithdrawn ? {
+        promotionalEmailConsentAt: null,
+        promotionalEmailConsentSource: null,
+        promotionalEmailConsentEmail: null,
+        promotionalEmailUnsubscribedAt: new Date(),
+      } : {}),
+    };
+    const updated = consentWithdrawn
+      ? await prisma.$transaction(async (transaction) => {
+        const person = await transaction.person.update({ where: { id }, data: updateData, include: { documentType: true } });
+        await transaction.residentEmailConsentEvent.create({
+          data: {
+            personId: id,
+            email: existing.promotionalEmailConsentEmail ?? existing.email ?? '',
+            action: ResidentEmailConsentAction.WITHDRAWN,
+            source: 'Cambio del correo registrado',
+            recordedById: req.user!.id,
+          },
+        });
+        return person;
+      })
+      : await prisma.person.update({ where: { id }, data: updateData, include: { documentType: true } });
+    return res.json(updated);
   } catch (error) {
     if (error instanceof Error && error.message.startsWith('El teléfono')) return res.status(400).json({ message: error.message });
     if (error instanceof Error && 'code' in error && error.code === 'P2002') return res.status(409).json({ message: 'Ya existe esa combinación de documento.' });
@@ -243,6 +290,34 @@ function requireAnyPermission(...requestedPermissions: Permission[]) {
     }
     return next();
   };
+}
+
+function residentAudienceWhere(
+  residenceId: number,
+  filters: z.infer<typeof residentCommunicationResidentFilterSchema>,
+  personIds?: number[],
+): Prisma.PersonWhereInput {
+  const where: Prisma.PersonWhereInput = {
+    residenceId,
+    type: PersonType.RESIDENTE,
+    email: { not: null },
+  };
+  if (filters.status === 'ACTIVE') where.active = true;
+  if (filters.status === 'INACTIVE') where.active = false;
+  if (personIds) where.id = { in: personIds };
+  if (filters.buildingSectionType) where.buildingSectionType = filters.buildingSectionType;
+  if (filters.buildingSectionNumber) where.buildingSectionNumber = { contains: filters.buildingSectionNumber, mode: 'insensitive' };
+  if (filters.apartmentNumber) where.apartmentNumber = { contains: filters.apartmentNumber, mode: 'insensitive' };
+  if (filters.search) {
+    where.OR = [
+      { fullName: { contains: filters.search, mode: 'insensitive' } },
+      { documentNumber: { contains: filters.search, mode: 'insensitive' } },
+      { email: { contains: filters.search, mode: 'insensitive' } },
+      { buildingSectionNumber: { contains: filters.search, mode: 'insensitive' } },
+      { apartmentNumber: { contains: filters.search, mode: 'insensitive' } },
+    ];
+  }
+  return where;
 }
 
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));
@@ -832,6 +907,314 @@ app.post('/api/admin/resident-invitations', requireAuth, requirePermission('USER
       return res.status(502).json({ message: 'No se pudo enviar el correo. Revisa la configuración y vuelve a intentar.' });
     }
     return res.status(201).json({ email: invitation.email, expiresAt: invitation.expiresAt });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.get('/api/admin/communications/residents', requireAuth, allowRoles(UserRole.SUPER_ADMINISTRADOR, UserRole.ADMINISTRADOR), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const filters = residentCommunicationResidentFilterSchema.parse({
+      status: req.query.status === undefined ? 'ALL' : String(req.query.status),
+      search: req.query.search === undefined ? undefined : String(req.query.search),
+      buildingSectionType: req.query.buildingSectionType === undefined ? undefined : String(req.query.buildingSectionType),
+      buildingSectionNumber: req.query.buildingSectionNumber === undefined ? undefined : String(req.query.buildingSectionNumber),
+      apartmentNumber: req.query.apartmentNumber === undefined ? undefined : String(req.query.apartmentNumber),
+    });
+    const residents = await prisma.person.findMany({
+      where: residentAudienceWhere(req.user!.residenceId, filters),
+      select: {
+        id: true,
+        fullName: true,
+        documentNumber: true,
+        email: true,
+        active: true,
+        buildingSectionType: true,
+        buildingSectionNumber: true,
+        apartmentNumber: true,
+        promotionalEmailConsentAt: true,
+        promotionalEmailConsentSource: true,
+        promotionalEmailConsentEmail: true,
+        promotionalEmailUnsubscribedAt: true,
+      },
+      orderBy: [{ buildingSectionNumber: 'asc' }, { apartmentNumber: 'asc' }, { fullName: 'asc' }],
+    });
+    return res.json(residents);
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.put('/api/admin/communications/residents/:id/promotional-consent', requireAuth, allowRoles(UserRole.SUPER_ADMINISTRADOR, UserRole.ADMINISTRADOR), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const personId = Number(req.params.id);
+    if (!Number.isSafeInteger(personId) || personId <= 0) return res.status(400).json({ message: 'Identificador de residente inválido.' });
+    const input = residentEmailConsentSchema.parse(req.body);
+    const person = await prisma.person.findFirst({
+      where: { id: personId, residenceId: req.user!.residenceId, type: PersonType.RESIDENTE },
+      select: { id: true, email: true, promotionalEmailConsentEmail: true },
+    });
+    if (!person) return res.status(404).json({ message: 'Residente no encontrado.' });
+    if (input.consented && !person.email) return res.status(409).json({ message: 'Registra un correo electrónico antes de autorizar promociones.' });
+    const email = (person.email ?? person.promotionalEmailConsentEmail ?? '').trim().toLowerCase();
+    const recordedAt = new Date();
+    await prisma.$transaction([
+      prisma.person.update({
+        where: { id: person.id },
+        data: input.consented
+          ? {
+            promotionalEmailConsentAt: recordedAt,
+            promotionalEmailConsentSource: input.source,
+            promotionalEmailConsentEmail: email,
+            promotionalEmailUnsubscribedAt: null,
+          }
+          : {
+            promotionalEmailConsentAt: null,
+            promotionalEmailConsentSource: null,
+            promotionalEmailConsentEmail: null,
+            promotionalEmailUnsubscribedAt: recordedAt,
+          },
+      }),
+      prisma.residentEmailConsentEvent.create({
+        data: {
+          personId: person.id,
+          email,
+          action: input.consented ? ResidentEmailConsentAction.GRANTED : ResidentEmailConsentAction.WITHDRAWN,
+          source: input.source,
+          recordedById: req.user!.id,
+          createdAt: recordedAt,
+        },
+      }),
+    ]);
+    return res.json({ personId: person.id, consented: input.consented, recordedAt });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.get('/api/admin/communications', requireAuth, allowRoles(UserRole.SUPER_ADMINISTRADOR, UserRole.ADMINISTRADOR), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const communications = await prisma.residentCommunication.findMany({
+      where: { residenceId: req.user!.residenceId },
+      orderBy: { createdAt: 'desc' },
+      take: 30,
+      select: {
+        id: true,
+        type: true,
+        subject: true,
+        body: true,
+        status: true,
+        audienceStatus: true,
+        createdAt: true,
+        completedAt: true,
+        createdBy: { select: { name: true } },
+        recipients: {
+          select: { id: true, email: true, personIds: true, residentNames: true, status: true, error: true, sentAt: true },
+          orderBy: { email: 'asc' },
+        },
+      },
+    });
+    return res.json(communications);
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.post('/api/admin/communications', requireAuth, allowRoles(UserRole.SUPER_ADMINISTRADOR, UserRole.ADMINISTRADOR), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const input = residentCommunicationCreateSchema.parse(req.body);
+    let configured: boolean;
+    try {
+      configured = residentCommunicationMailer.isConfigured();
+    } catch (error) {
+      return next(error);
+    }
+    if (!configured) return res.status(503).json({ message: 'El correo aún no está configurado. Completa SMTP en apps/api/.env.' });
+
+    const filters = {
+      status: input.audienceStatus,
+      search: input.search,
+      buildingSectionType: input.buildingSectionType,
+      buildingSectionNumber: input.buildingSectionNumber,
+      apartmentNumber: input.apartmentNumber,
+    };
+    const selectedIds = input.selectAll ? undefined : [...new Set(input.personIds)];
+    const residents = await prisma.person.findMany({
+      where: residentAudienceWhere(req.user!.residenceId, filters, selectedIds),
+      select: {
+        id: true,
+        fullName: true,
+        email: true,
+        promotionalEmailConsentAt: true,
+        promotionalEmailConsentEmail: true,
+        promotionalEmailUnsubscribedAt: true,
+      },
+      orderBy: [{ fullName: 'asc' }],
+    });
+    if (selectedIds && residents.length !== selectedIds.length) {
+      return res.status(400).json({ message: 'Uno o más residentes seleccionados ya no existen, no tienen correo o no coinciden con los filtros actuales.' });
+    }
+    const eligibleResidents = input.type === ResidentCommunicationType.PROMOTIONAL
+      ? residents.filter((person) => person.promotionalEmailConsentAt
+        && !person.promotionalEmailUnsubscribedAt
+        && person.promotionalEmailConsentEmail?.trim().toLowerCase() === person.email?.trim().toLowerCase())
+      : residents;
+    const grouped = new Map<string, { personIds: number[]; residentNames: string[]; unsubscribeToken?: string }>();
+    for (const resident of eligibleResidents) {
+      const email = resident.email?.trim().toLowerCase();
+      if (!email) continue;
+      const group = grouped.get(email) ?? { personIds: [], residentNames: [] };
+      group.personIds.push(resident.id);
+      group.residentNames.push(resident.fullName);
+      grouped.set(email, group);
+    }
+    if (grouped.size === 0) {
+      const message = input.type === ResidentCommunicationType.PROMOTIONAL
+        ? 'No hay destinatarios con autorización promocional vigente y correo asociado.'
+        : 'No hay residentes con correo electrónico que coincidan con la selección.';
+      return res.status(400).json({ message });
+    }
+    const residence = await prisma.residence.findFirst({
+      where: { id: req.user!.residenceId, active: true },
+      select: { name: true },
+    });
+    if (!residence) return res.status(404).json({ message: 'Residencia no encontrada o inactiva.' });
+    if (input.type === ResidentCommunicationType.PROMOTIONAL) {
+      for (const group of grouped.values()) group.unsubscribeToken = randomBytes(32).toString('hex');
+    }
+
+    const communication = await prisma.residentCommunication.create({
+      data: {
+        type: input.type,
+        subject: input.subject,
+        body: input.body,
+        audienceStatus: input.audienceStatus,
+        audienceFilter: {
+          selectAll: input.selectAll,
+          status: input.audienceStatus,
+          search: input.search ?? null,
+          buildingSectionType: input.buildingSectionType ?? null,
+          buildingSectionNumber: input.buildingSectionNumber ?? null,
+          apartmentNumber: input.apartmentNumber ?? null,
+        },
+        createdById: req.user!.id,
+        residenceId: req.user!.residenceId,
+        recipients: {
+          create: [...grouped.entries()].map(([email, group]) => ({
+            email,
+            personIds: group.personIds,
+            residentNames: group.residentNames,
+            ...(group.unsubscribeToken
+              ? { unsubscribeTokenHash: createHash('sha256').update(group.unsubscribeToken).digest('hex') }
+              : {}),
+          })),
+        },
+      },
+      include: { recipients: true },
+    });
+
+    let sent = 0;
+    let failed = 0;
+    for (const recipient of communication.recipients) {
+      const group = grouped.get(recipient.email)!;
+      const unsubscribeUrl = group.unsubscribeToken
+        ? (() => {
+          const url = new URL(process.env.WEB_APP_URL ?? 'http://localhost:5173');
+          url.hash = new URLSearchParams({ 'email-unsubscribe': group.unsubscribeToken! }).toString();
+          return url.toString();
+        })()
+        : undefined;
+      try {
+        await residentCommunicationMailer.sendMessage({
+          email: recipient.email,
+          residenceName: residence.name,
+          subject: communication.subject,
+          body: communication.body,
+          unsubscribeUrl,
+        });
+        await prisma.residentCommunicationRecipient.update({
+          where: { id: recipient.id },
+          data: { status: ResidentCommunicationDeliveryStatus.SENT, sentAt: new Date() },
+        });
+        sent += 1;
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : 'Error SMTP no identificado.';
+        const safeDetail = process.env.SMTP_APP_PASSWORD
+          ? detail.replaceAll(process.env.SMTP_APP_PASSWORD, '[oculto]').slice(0, 500)
+          : detail.slice(0, 500);
+        console.error(`Falló el envío del destinatario ${recipient.id} del comunicado ${communication.id}.`, safeDetail);
+        await prisma.residentCommunicationRecipient.update({
+          where: { id: recipient.id },
+          data: { status: ResidentCommunicationDeliveryStatus.FAILED, error: safeDetail },
+        });
+        failed += 1;
+      }
+    }
+    const status = failed === 0
+      ? ResidentCommunicationStatus.COMPLETED
+      : sent === 0 ? ResidentCommunicationStatus.FAILED : ResidentCommunicationStatus.PARTIAL;
+    const updated = await prisma.residentCommunication.update({
+      where: { id: communication.id },
+      data: { status, completedAt: new Date() },
+      select: {
+        id: true,
+        status: true,
+        recipients: {
+          select: { email: true, residentNames: true, status: true, error: true, sentAt: true },
+          orderBy: { email: 'asc' },
+        },
+      },
+    });
+    return res.status(failed ? 207 : 201).json({
+      ...updated,
+      counts: { total: communication.recipients.length, sent, failed, excludedWithoutConsent: residents.length - eligibleResidents.length },
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.post('/api/email-preferences/unsubscribe', async (req, res, next) => {
+  try {
+    const input = residentEmailUnsubscribeSchema.parse(req.body);
+    const tokenHash = createHash('sha256').update(input.token).digest('hex');
+    const recipient = await prisma.residentCommunicationRecipient.findUnique({
+      where: { unsubscribeTokenHash: tokenHash },
+      include: { communication: { select: { residenceId: true, type: true } } },
+    });
+    if (!recipient || recipient.communication.type !== ResidentCommunicationType.PROMOTIONAL) {
+      return res.status(404).json({ message: 'El enlace de baja no es válido.' });
+    }
+    const people = await prisma.person.findMany({
+      where: {
+        id: { in: recipient.personIds },
+        residenceId: recipient.communication.residenceId,
+        type: PersonType.RESIDENTE,
+        promotionalEmailConsentAt: { not: null },
+        promotionalEmailUnsubscribedAt: null,
+        promotionalEmailConsentEmail: { equals: recipient.email, mode: 'insensitive' },
+      },
+      select: { id: true },
+    });
+    if (people.length) {
+      const withdrawnAt = new Date();
+      await prisma.$transaction([
+        prisma.person.updateMany({
+          where: { id: { in: people.map(({ id }) => id) }, residenceId: recipient.communication.residenceId },
+          data: { promotionalEmailUnsubscribedAt: withdrawnAt },
+        }),
+        prisma.residentEmailConsentEvent.createMany({
+          data: people.map(({ id }) => ({
+            personId: id,
+            email: recipient.email,
+            action: ResidentEmailConsentAction.WITHDRAWN,
+            source: 'Enlace de baja de correo promocional',
+            createdAt: withdrawnAt,
+          })),
+        }),
+      ]);
+    }
+    return res.json({ message: 'La dirección se dio de baja de los correos promocionales.' });
   } catch (error) {
     return next(error);
   }

@@ -20,4 +20,128 @@
 .login-card .password-input-wrap{position:relative;margin-top:7px}.login-card .password-input-wrap input{margin-top:0;padding-right:48px}.login-card .password-visibility-toggle{position:absolute;top:50%;right:5px;transform:translateY(-50%);display:grid;place-items:center;width:38px!important;height:38px;margin:0!important;padding:8px;background:transparent;color:#74809a;border-radius:7px}.login-card .password-visibility-toggle:hover{background:#eef3fb;color:#315070}.login-card .password-visibility-toggle:focus-visible{outline:2px solid #1966f3;outline-offset:1px}.password-visibility-toggle svg{width:20px;height:20px}
 .resident-portal{max-width:1180px}.resident-portal header{display:flex;align-items:center}.resident-portal header p{color:#74809a;margin-top:8px}.visit-help,.visit-registration>p{color:#61708a;margin-bottom:16px}.visit-registration{padding:18px;margin-bottom:24px;border:1px solid #e6ebf2;border-radius:12px;background:#f8faff}.visit-registration>p{font-size:14px}.visit-approval{grid-column:1/-1;align-items:flex-start!important}.visit-approval input{margin-top:2px!important}.resident-visit-row{grid-template-columns:1.3fr 1.5fr 1fr .8fr}.staff-visit-row{grid-template-columns:1.1fr 1fr 1.5fr .9fr}.resident-visit-row small,.staff-visit-row small{display:block;color:#74809a;font-size:12px;font-weight:400;margin-top:3px}.visit-panel{margin-top:24px}.staff-visit-row button{display:block;margin-top:7px}.resident-visit-row button{margin-top:0}@media(max-width:760px){.resident-portal header{gap:16px}.resident-portal header h1{font-size:28px}.resident-visit-row,.staff-visit-row{grid-template-columns:1fr 1fr;gap:8px}.resident-visit-row.heading,.staff-visit-row.heading{display:none}.visit-approval{grid-column:1/-1}}
 .form-grid textarea{display:block;width:100%;margin-top:7px;padding:12px;border:1px solid #dbe2ed;border-radius:8px;font:inherit;background:#fff;resize:vertical}
+
+.resident-communications .communication-form {
+  margin-top: 20px;
+}
+
+.communication-selection {
+  display: grid;
+  gap: 12px;
+}
+
+.communication-confirmation {
+  width: min(100%, 520px);
+}
+
+.communication-confirmation > p {
+  margin-bottom: 16px;
+}
+
+.communication-confirmation .communication-confirmation-warning {
+  padding: 12px 14px;
+  border-radius: 8px;
+  color: #8a4a16;
+  background: #fff8ed;
+}
+
+.communication-confirmation-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 24px;
+}
+
+.communication-resident-list {
+  display: grid;
+  max-height: 420px;
+  overflow: auto;
+  border: 1px solid #dce3eb;
+  border-radius: 12px;
+}
+
+.communication-resident {
+  display: grid;
+  grid-template-columns: auto minmax(180px, 1fr) auto auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border-bottom: 1px solid #e8edf2;
+}
+
+.communication-resident:last-child {
+  border-bottom: 0;
+}
+
+.communication-resident span:first-of-type {
+  display: grid;
+  gap: 3px;
+}
+
+.communication-resident small {
+  color: #64748b;
+}
+
+.communication-resident input[type="checkbox"] {
+  width: auto;
+}
+
+.communication-consent {
+  color: #16704a;
+}
+
+.communication-no-consent,
+.communication-inactive {
+  color: #8a4b08;
+}
+
+.communication-active {
+  color: #16704a;
+}
+
+.communication-consent-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.communication-history-heading {
+  margin-top: 32px;
+}
+
+.communication-history {
+  display: grid;
+  gap: 10px;
+}
+
+.communication-history-item {
+  padding: 14px;
+  border: 1px solid #dce3eb;
+  border-radius: 12px;
+}
+
+.communication-history-item summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+}
+
+.communication-history-item summary strong {
+  flex: 1 1 220px;
+}
+
+.communication-history-item ul {
+  display: grid;
+  gap: 6px;
+  padding-left: 20px;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 900px) {
+  .communication-resident {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+}
 .visit-search{display:block;max-width:520px;margin:0 0 18px;font-size:13px;font-weight:700}.visit-search input{display:block;width:100%;margin-top:7px;padding:12px;border:1px solid #dbe2ed;border-radius:8px;font:inherit;background:#fff}
