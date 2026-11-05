@@ -5,6 +5,8 @@ import QRCode from 'qrcode';
 import { FormEvent, StrictMode, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { UserAdministration } from './UserAdministration';
+import { ResidentCommunications } from './ResidentCommunications';
+import { ResidentEmailUnsubscribe } from './ResidentEmailUnsubscribe';
 import { apiBaseUrl } from './api';
 import './access-search.css';
 import './styles.css';
@@ -247,6 +249,7 @@ function App() {
   const [loginError, setLoginError] = useState('');
   const [loginNotice, setLoginNotice] = useState('');
   const [invitationToken, setInvitationToken] = useState(() => new URLSearchParams(window.location.hash.slice(1)).get('invite') ?? '');
+  const [emailUnsubscribeToken] = useState(() => new URLSearchParams(window.location.hash.slice(1)).get('email-unsubscribe') ?? '');
   const [activationPassword, setActivationPassword] = useState('');
   const [activationPasswordConfirmation, setActivationPasswordConfirmation] = useState('');
   const [showActivationPassword, setShowActivationPassword] = useState(false);
@@ -321,7 +324,7 @@ function App() {
   const [residenceLogo, setResidenceLogo] = useState<File | null>(null);
   const [residenceLogoPreview, setResidenceLogoPreview] = useState('');
   const [removeResidenceLogo, setRemoveResidenceLogo] = useState(false);
-  const [activeView, setActiveView] = useState<'movements' | 'people' | 'vehicles' | 'deliveries' | 'visits' | 'settings' | 'users'>(() => {
+  const [activeView, setActiveView] = useState<'movements' | 'people' | 'vehicles' | 'deliveries' | 'visits' | 'settings' | 'users' | 'communications'>(() => {
     const storedPermissions: string[] = JSON.parse(localStorage.getItem('userPermissions') ?? '[]');
     if (storedPermissions.includes('ACCESS_VIEW') || storedPermissions.includes('ACCESS_REGISTER')) return 'movements';
     if (storedPermissions.includes('PEOPLE_VIEW')) return 'people';
@@ -1257,6 +1260,8 @@ function App() {
     finally { setSaving(false); }
   }
 
+  if (emailUnsubscribeToken) return <ResidentEmailUnsubscribe token={emailUnsubscribeToken} />;
+
   if (invitationToken) return <main className="login-page"><form className="login-card" onSubmit={activateResident}>
     <span className="eyebrow">RESI CONTROL</span><h1>Activa tu cuenta</h1><p>Crea una contraseña para acceder como residente.</p>
     <label>Nueva contraseña<div className="password-input-wrap"><input type={showActivationPassword ? 'text' : 'password'} autoComplete="new-password" minLength={12} maxLength={128} required value={activationPassword} onChange={(event) => setActivationPassword(event.target.value)} /><PasswordVisibilityButton visible={showActivationPassword} onToggle={() => setShowActivationPassword((visible) => !visible)} label="nueva contraseña" /></div></label>
@@ -1304,7 +1309,7 @@ function App() {
   return <main>
     <header><div className="brand"><div className="residence-logo">{residenceLogoUrl ? <img src={residenceLogoUrl} alt={`Logo de ${residence?.name ?? 'la residencia'}`} /> : <span>RC</span>}</div><div><span className="eyebrow">RESI CONTROL</span><h1>{residence?.name ?? 'Control de acceso'}</h1><p>Supervisión del conjunto residencial en tiempo real.</p></div></div><div className="header-controls">
       {userRole === 'SUPER_ADMINISTRADOR' && <label className="residence-selector">Residencia<select aria-label="Residencia activa" value={activeResidenceId} onChange={(event) => { const selected = event.target.value; localStorage.setItem('activeResidenceId', selected); setActiveResidenceId(selected); }}><option value="">Selecciona residencia</option>{availableResidences.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>}
-      <div className="actions">{(can('ACCESS_VIEW') || can('ACCESS_REGISTER')) && <button className={activeView === 'movements' ? 'active-nav' : ''} onClick={() => { setActiveView('movements'); setShowAccessForm(false); }}>Movimientos</button>}{can('ACCESS_VIEW') && <button className={activeView === 'visits' ? 'active-nav' : ''} onClick={() => setActiveView('visits')}>Visitas</button>}{can('PEOPLE_VIEW') && <button className={activeView === 'people' ? 'active-nav' : ''} onClick={() => { setActiveView('people'); setShowAccessForm(false); }}>Personas</button>}{can('VEHICLES_VIEW') && <button className={activeView === 'vehicles' ? 'active-nav' : ''} onClick={() => { setActiveView('vehicles'); setShowAccessForm(false); }}>Vehículos</button>}{can('DELIVERIES_VIEW') && <button className={activeView === 'deliveries' ? 'active-nav' : ''} onClick={() => { setActiveView('deliveries'); setShowAccessForm(false); }}>Encomiendas{totals.pendingDeliveries ? ` · ${totals.pendingDeliveries}` : ''}</button>}{can('SETTINGS_MANAGE') && <button className={activeView === 'settings' ? 'active-nav' : ''} onClick={() => { setActiveView('settings'); setShowSettings(true); }}>Configuración</button>}{can('USERS_MANAGE') && <button className={activeView === 'users' ? 'active-nav' : ''} onClick={() => setActiveView('users')}>Usuarios y roles</button>}</div>
+      <div className="actions">{(can('ACCESS_VIEW') || can('ACCESS_REGISTER')) && <button className={activeView === 'movements' ? 'active-nav' : ''} onClick={() => { setActiveView('movements'); setShowAccessForm(false); }}>Movimientos</button>}{can('ACCESS_VIEW') && <button className={activeView === 'visits' ? 'active-nav' : ''} onClick={() => setActiveView('visits')}>Visitas</button>}{can('PEOPLE_VIEW') && <button className={activeView === 'people' ? 'active-nav' : ''} onClick={() => { setActiveView('people'); setShowAccessForm(false); }}>Personas</button>}{can('VEHICLES_VIEW') && <button className={activeView === 'vehicles' ? 'active-nav' : ''} onClick={() => { setActiveView('vehicles'); setShowAccessForm(false); }}>Vehículos</button>}{can('DELIVERIES_VIEW') && <button className={activeView === 'deliveries' ? 'active-nav' : ''} onClick={() => { setActiveView('deliveries'); setShowAccessForm(false); }}>Encomiendas{totals.pendingDeliveries ? ` · ${totals.pendingDeliveries}` : ''}</button>}{can('SETTINGS_MANAGE') && <button className={activeView === 'settings' ? 'active-nav' : ''} onClick={() => { setActiveView('settings'); setShowSettings(true); }}>Configuración</button>}{can('USERS_MANAGE') && <button className={activeView === 'users' ? 'active-nav' : ''} onClick={() => setActiveView('users')}>Usuarios y roles</button>}{(userRole === 'SUPER_ADMINISTRADOR' || userRole === 'ADMINISTRADOR') && <button className={activeView === 'communications' ? 'active-nav' : ''} onClick={() => setActiveView('communications')}>Comunicados</button>}</div>
       <button type="button" className="secondary" onClick={logout}>Cerrar sesión</button>
     </div></header>
     {error && <div className="notice">{error}</div>}
@@ -1419,6 +1424,7 @@ function App() {
       </div>)}</div> : <div className="empty">{visitSearch.trim() ? 'No se encontraron visitas con ese nombre, documento o placa.' : 'No hay visitas registradas.'}</div>}
     </section>}
     {activeView === 'users' && can('USERS_MANAGE') && <UserAdministration canManageRoles={can('ROLES_MANAGE')} isSuperAdmin={userRole === 'SUPER_ADMINISTRADOR'} currentUserId={currentUserId} />}
+    {activeView === 'communications' && (userRole === 'SUPER_ADMINISTRADOR' || userRole === 'ADMINISTRADOR') && <ResidentCommunications />}
     {activeView === 'movements' && can('ACCESS_VIEW') && <section className="panel"><div className="panel-heading"><div><span className="eyebrow">ACTIVIDAD</span><h2>Últimos movimientos</h2></div><div className="panel-actions"><span className="live">● En vivo</span>{can('ACCESS_REGISTER') && <button onClick={openAccessForm}>Registrar acceso</button>}</div></div>
       {logs.length ? <div className="table"><div className="row movement-row heading"><span>Persona responsable</span><span>Ubicación</span><span>Vehículo</span><span>Movimiento</span><span>Hora</span></div>{logs.map((log) => <div className="row movement-row movement-row-clickable" key={log.id} role="button" tabIndex={0} onClick={() => setSelectedLog(log)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') setSelectedLog(log); }}><strong>{log.person.fullName}</strong><span>{formatPersonLocation(log.person)}</span><span>{log.vehicle ? `${log.vehicle.plate} · Vehículo` : 'Peatonal'}</span><span className={log.accessType === 'ENTRADA' ? 'entry' : 'exit'}>{log.accessType === 'ENTRADA' ? 'Entrada' : 'Salida'}</span><span>{new Date(log.occurredAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></div>)}</div> : <div className="empty">Aún no hay movimientos registrados.</div>}
     </section>}

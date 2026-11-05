@@ -11,6 +11,36 @@ export const residentInvitationAcceptanceSchema = z.object({
   token: z.string().min(40).max(200),
   password: z.string().min(12).max(128),
 });
+export const residentCommunicationResidentFilterSchema = z.object({
+  status: z.enum(['ALL', 'ACTIVE', 'INACTIVE']).default('ALL'),
+  search: z.string().trim().max(120).optional(),
+  buildingSectionType: z.nativeEnum(BuildingSectionType).optional(),
+  buildingSectionNumber: z.string().trim().max(30).optional(),
+  apartmentNumber: z.string().trim().max(30).optional(),
+});
+export const residentEmailConsentSchema = z.object({
+  consented: z.boolean(),
+  source: z.string().trim().min(3).max(250),
+});
+export const residentCommunicationCreateSchema = z.object({
+  type: z.enum(['ADMINISTRATIVE', 'PROMOTIONAL']),
+  subject: z.string().trim().min(1).max(200),
+  body: z.string().trim().min(1).max(10_000),
+  audienceStatus: z.enum(['ALL', 'ACTIVE', 'INACTIVE']),
+  selectAll: z.boolean(),
+  personIds: z.array(z.number().int().positive()).default([]),
+  search: z.string().trim().max(120).optional(),
+  buildingSectionType: z.nativeEnum(BuildingSectionType).optional(),
+  buildingSectionNumber: z.string().trim().max(30).optional(),
+  apartmentNumber: z.string().trim().max(30).optional(),
+}).superRefine((value, context) => {
+  if (!value.selectAll && value.personIds.length === 0) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['personIds'], message: 'Selecciona al menos un residente.' });
+  }
+});
+export const residentEmailUnsubscribeSchema = z.object({
+  token: z.string().regex(/^[a-f0-9]{64}$/),
+});
 export const accessSchema = z.object({
   personId: z.number().int().positive(),
   vehicleId: z.number().int().positive().optional(),

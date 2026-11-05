@@ -1,6 +1,6 @@
 import nodemailer from 'nodemailer';
 
-type MailConfiguration = {
+export type MailConfiguration = {
   host: string;
   port: number;
   secure: boolean;
@@ -14,7 +14,7 @@ export type ResidentInvitationMailer = {
   sendInvitation(input: { email: string; residentName: string; residenceName: string; url: string }): Promise<void>;
 };
 
-function getConfiguration(environment: NodeJS.ProcessEnv): MailConfiguration | null {
+export function getMailConfiguration(environment: NodeJS.ProcessEnv): MailConfiguration | null {
   const { SMTP_HOST, SMTP_PORT, SMTP_SECURE, SMTP_USER, SMTP_APP_PASSWORD, EMAIL_FROM, WEB_APP_URL } = environment;
   if (!SMTP_HOST || !SMTP_PORT || !SMTP_USER || !SMTP_APP_PASSWORD || !EMAIL_FROM || !WEB_APP_URL) return null;
   const port = Number(SMTP_PORT);
@@ -46,9 +46,9 @@ function escapeHtml(value: string) {
 
 export function createResidentInvitationMailer(environment: NodeJS.ProcessEnv = process.env): ResidentInvitationMailer {
   return {
-    isConfigured: () => Boolean(getConfiguration(environment)),
+    isConfigured: () => Boolean(getMailConfiguration(environment)),
     async sendInvitation({ email, residentName, residenceName, url }) {
-      const configuration = getConfiguration(environment);
+      const configuration = getMailConfiguration(environment);
       if (!configuration) throw new Error('Configura el servicio SMTP antes de enviar invitaciones.');
       const transporter = nodemailer.createTransport({
         host: configuration.host,

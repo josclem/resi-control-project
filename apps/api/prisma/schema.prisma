@@ -64,96 +64,127 @@ enum VisitOrigin {
   PORTERIA
 }
 
+enum ResidentCommunicationType {
+  ADMINISTRATIVE
+  PROMOTIONAL
+}
+
+enum ResidentCommunicationStatus {
+  SENDING
+  COMPLETED
+  PARTIAL
+  FAILED
+}
+
+enum ResidentCommunicationDeliveryStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+enum ResidentEmailConsentAction {
+  GRANTED
+  WITHDRAWN
+}
+
 model Residence {
-  id          Int             @id @default(autoincrement())
-  name        String
-  code        String          @unique
-  active      Boolean         @default(true)
-  logoData    Bytes?
-  logoMimeType String?
-  createdAt   DateTime        @default(now())
-  users       User[]
-  people      Person[]
-  vehicles    Vehicle[]
-  accessLogs  AccessLog[]
-  settings    SystemSetting[]
-  deliveries  Delivery[]
-  customRoles CustomRole[]
-  visits       VisitPreRegistration[]
+  id             Int                     @id @default(autoincrement())
+  name           String
+  code           String                  @unique
+  active         Boolean                 @default(true)
+  logoData       Bytes?
+  logoMimeType   String?
+  createdAt      DateTime                @default(now())
+  users          User[]
+  people         Person[]
+  vehicles       Vehicle[]
+  accessLogs     AccessLog[]
+  settings       SystemSetting[]
+  deliveries     Delivery[]
+  customRoles    CustomRole[]
+  visits         VisitPreRegistration[]
+  communications ResidentCommunication[]
 }
 
 model User {
-  id           Int      @id @default(autoincrement())
-  name         String
-  email        String   @unique
-  passwordHash String
-  role         UserRole
-  active       Boolean  @default(true)
-  createdAt    DateTime @default(now())
-  residenceId  Int      @default(1)
-  residence    Residence @relation(fields: [residenceId], references: [id])
-  residentPersonId Int? @unique
-  residentPerson Person? @relation("ResidentAccount", fields: [residentPersonId], references: [id])
-  customRoleId Int?
-  customRole   CustomRole? @relation("UserCustomRole", fields: [customRoleId], references: [id])
-  accessLogs   AccessLog[]
-  authorizedAccessLogs AccessLog[] @relation("AccessOverride")
-  receivedDeliveries Delivery[] @relation("DeliveryReceived")
-  deliveredDeliveries Delivery[] @relation("DeliveryDelivered")
-  customRolesCreated CustomRole[] @relation("CustomRoleCreator")
-  residentInvitationsCreated ResidentInvitation[] @relation("ResidentInvitationCreator")
-  visitsCreated              VisitPreRegistration[] @relation("VisitCreator")
+  id                         Int                         @id @default(autoincrement())
+  name                       String
+  email                      String                      @unique
+  passwordHash               String
+  role                       UserRole
+  active                     Boolean                     @default(true)
+  createdAt                  DateTime                    @default(now())
+  residenceId                Int                         @default(1)
+  residence                  Residence                   @relation(fields: [residenceId], references: [id])
+  customRoleId               Int?
+  customRole                 CustomRole?                 @relation("UserCustomRole", fields: [customRoleId], references: [id])
+  residentPersonId           Int?                        @unique
+  residentPerson             Person?                     @relation("ResidentAccount", fields: [residentPersonId], references: [id])
+  accessLogs                 AccessLog[]
+  authorizedAccessLogs       AccessLog[]                 @relation("AccessOverride")
+  receivedDeliveries         Delivery[]                  @relation("DeliveryReceived")
+  deliveredDeliveries        Delivery[]                  @relation("DeliveryDelivered")
+  customRolesCreated         CustomRole[]                @relation("CustomRoleCreator")
+  residentInvitationsCreated ResidentInvitation[]        @relation("ResidentInvitationCreator")
+  visitsCreated              VisitPreRegistration[]      @relation("VisitCreator")
+  communicationsCreated      ResidentCommunication[]
+  residentEmailConsentEvents ResidentEmailConsentEvent[] @relation("ResidentEmailConsentRecorder")
 }
 
 model CustomRole {
-  id          Int      @id @default(autoincrement())
+  id          Int       @id @default(autoincrement())
   name        String
   permissions String[]
-  active      Boolean  @default(true)
+  active      Boolean   @default(true)
   residenceId Int
   createdById Int
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
   residence   Residence @relation(fields: [residenceId], references: [id])
-  createdBy   User     @relation("CustomRoleCreator", fields: [createdById], references: [id])
-  users       User[]   @relation("UserCustomRole")
+  createdBy   User      @relation("CustomRoleCreator", fields: [createdById], references: [id])
+  users       User[]    @relation("UserCustomRole")
 
   @@unique([residenceId, name])
   @@index([residenceId, active])
 }
 
 model Person {
-  id               Int        @id @default(autoincrement())
-  accessCode       String     @unique @default(uuid())
-  type             PersonType
-  fullName         String
-  documentNumber   String?
-  documentTypeId   Int?
-  buildingSectionType BuildingSectionType?
-  buildingSectionNumber String?
-  apartmentNumber  String
-  phone            String?
-  email String?
-  biometricRef     String?    @unique
-  active           Boolean    @default(true)
-  createdAt        DateTime   @default(now())
-  updatedAt        DateTime   @updatedAt
-  residenceId      Int        @default(1)
-  residence       Residence  @relation(fields: [residenceId], references: [id])
-  accessLogs       AccessLog[]
-  vehicles         Vehicle[]
-  documentType     DocumentType? @relation(fields: [documentTypeId], references: [id])
-  photo            PersonPhoto?
-  deliveries       Delivery[]
-  residentUser User? @relation("ResidentAccount")
-  residentInvitations ResidentInvitation[]
+  id                             Int                         @id @default(autoincrement())
+  accessCode                     String                      @unique @default(uuid())
+  type                           PersonType
+  fullName                       String
+  documentNumber                 String?
+  documentTypeId                 Int?
+  buildingSectionType            BuildingSectionType?
+  buildingSectionNumber          String?
+  apartmentNumber                String
+  phone                          String?
+  email                          String?
+  promotionalEmailConsentAt      DateTime?
+  promotionalEmailConsentSource  String?
+  promotionalEmailConsentEmail   String?
+  promotionalEmailUnsubscribedAt DateTime?
+  biometricRef                   String?                     @unique
+  active                         Boolean                     @default(true)
+  createdAt                      DateTime                    @default(now())
+  updatedAt                      DateTime                    @updatedAt
+  residenceId                    Int                         @default(1)
+  residence                      Residence                   @relation(fields: [residenceId], references: [id])
+  accessLogs                     AccessLog[]
+  vehicles                       Vehicle[]
+  documentType                   DocumentType?               @relation(fields: [documentTypeId], references: [id])
+  photo                          PersonPhoto?
+  deliveries                     Delivery[]
+  residentUser                   User?                       @relation("ResidentAccount")
+  residentInvitations            ResidentInvitation[]
+  residentVisits                 VisitPreRegistration[]      @relation("VisitResident")
+  visitsAsVisitor                VisitPreRegistration[]      @relation("VisitVisitor")
+  emailConsentEvents             ResidentEmailConsentEvent[]
 
+  @@unique([residenceId, documentTypeId, documentNumber])
   @@index([fullName])
   @@index([apartmentNumber])
   @@index([residenceId, buildingSectionType, buildingSectionNumber])
-  @@unique([residenceId, documentTypeId, documentNumber])
-  residentVisits        VisitPreRegistration[] @relation("VisitResident")
-  visitsAsVisitor       VisitPreRegistration[] @relation("VisitVisitor")
 }
 
 model PersonPhoto {
@@ -169,25 +200,25 @@ model PersonPhoto {
 }
 
 model Vehicle {
-  id            Int         @id @default(autoincrement())
-  accessCode    String      @unique @default(uuid())
-  plate         String
-  type          VehicleType
-  brand         String?
-  model         String?
-  color         String?
-  active        Boolean     @default(true)
-  personId      Int
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
-  residenceId   Int         @default(1)
-  residence     Residence   @relation(fields: [residenceId], references: [id])
-  person        Person      @relation(fields: [personId], references: [id])
-  accessLogs    AccessLog[]
-  photo         VehiclePhoto?
+  id          Int           @id @default(autoincrement())
+  accessCode  String        @unique @default(uuid())
+  plate       String
+  type        VehicleType
+  brand       String?
+  model       String?
+  color       String?
+  active      Boolean       @default(true)
+  personId    Int
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  residenceId Int           @default(1)
+  residence   Residence     @relation(fields: [residenceId], references: [id])
+  person      Person        @relation(fields: [personId], references: [id])
+  accessLogs  AccessLog[]
+  photo       VehiclePhoto?
 
-  @@index([personId])
   @@unique([residenceId, plate])
+  @@index([personId])
 }
 
 model VehiclePhoto {
@@ -212,79 +243,26 @@ model DocumentType {
 }
 
 model AccessLog {
-  id          Int        @id @default(autoincrement())
-  accessType  AccessType
-  occurredAt  DateTime   @default(now())
-  personId    Int
-  vehicleId   Int?
-  registeredById Int
+  id                     Int                   @id @default(autoincrement())
+  accessType             AccessType
+  occurredAt             DateTime              @default(now())
+  personId               Int
+  vehicleId              Int?
+  registeredById         Int
   overrideAuthorizedById Int?
-  residenceId Int @default(1)
-  residence Residence @relation(fields: [residenceId], references: [id])
-  person      Person     @relation(fields: [personId], references: [id])
-  vehicle     Vehicle?   @relation(fields: [vehicleId], references: [id])
-  registeredBy User      @relation(fields: [registeredById], references: [id])
-  overrideAuthorizedBy User? @relation("AccessOverride", fields: [overrideAuthorizedById], references: [id])
+  visitPreRegistrationId Int?
+  residenceId            Int                   @default(1)
+  residence              Residence             @relation(fields: [residenceId], references: [id])
+  person                 Person                @relation(fields: [personId], references: [id])
+  vehicle                Vehicle?              @relation(fields: [vehicleId], references: [id])
+  registeredBy           User                  @relation(fields: [registeredById], references: [id])
+  overrideAuthorizedBy   User?                 @relation("AccessOverride", fields: [overrideAuthorizedById], references: [id])
+  visitPreRegistration   VisitPreRegistration? @relation(fields: [visitPreRegistrationId], references: [id])
 
   @@index([occurredAt])
   @@index([accessType])
   @@index([vehicleId])
-  visitPreRegistrationId Int?
-  visitPreRegistration   VisitPreRegistration? @relation(fields: [visitPreRegistrationId], references: [id])
   @@index([visitPreRegistrationId])
-}
-
-model SystemSetting {
-  id        Int      @id @default(autoincrement())
-  key       String
-  value     String
-  residenceId Int    @default(1)
-  residence Residence @relation(fields: [residenceId], references: [id])
-  updatedAt DateTime @updatedAt
-  @@unique([residenceId, key])
-}
-
-model Delivery {
-  id              Int            @id @default(autoincrement())
-  type            DeliveryType
-  status          DeliveryStatus @default(PENDIENTE)
-  courier         String?
-  description     String?
-  trackingCode    String?
-  notes           String?
-  receivedAt      DateTime       @default(now())
-  deliveredAt     DateTime?
-  deliveredToName String?
-  createdAt       DateTime       @default(now())
-  updatedAt       DateTime       @updatedAt
-  personId        Int
-  residenceId     Int            @default(1)
-  receivedById    Int
-  deliveredById   Int?
-  person          Person         @relation(fields: [personId], references: [id])
-  residence       Residence      @relation(fields: [residenceId], references: [id])
-  receivedBy      User           @relation("DeliveryReceived", fields: [receivedById], references: [id])
-  deliveredBy     User?          @relation("DeliveryDelivered", fields: [deliveredById], references: [id])
-
-  @@index([status])
-  @@index([receivedAt])
-  @@index([personId])
-}
-
-model ResidentInvitation {
-  id          Int       @id @default(autoincrement())
-  email       String
-  tokenHash   String    @unique
-  expiresAt   DateTime
-  acceptedAt  DateTime?
-  revokedAt   DateTime?
-  createdAt   DateTime  @default(now())
-  personId    Int
-  createdById Int
-  person      Person    @relation(fields: [personId], references: [id], onDelete: Cascade)
-  createdBy   User      @relation("ResidentInvitationCreator", fields: [createdById], references: [id])
-
-  @@index([personId, expiresAt])
 }
 
 model VisitPreRegistration {
@@ -315,4 +293,107 @@ model VisitPreRegistration {
 
   @@index([residenceId, status, validUntil])
   @@index([residentPersonId, createdAt])
+}
+
+model SystemSetting {
+  id          Int       @id @default(autoincrement())
+  key         String
+  value       String
+  residenceId Int       @default(1)
+  residence   Residence @relation(fields: [residenceId], references: [id])
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([residenceId, key])
+}
+
+model ResidentCommunication {
+  id             Int                              @id @default(autoincrement())
+  type           ResidentCommunicationType
+  subject        String
+  body           String
+  status         ResidentCommunicationStatus      @default(SENDING)
+  audienceStatus String
+  audienceFilter Json
+  createdAt      DateTime                         @default(now())
+  completedAt    DateTime?
+  createdById    Int
+  residenceId    Int
+  createdBy      User                             @relation(fields: [createdById], references: [id])
+  residence      Residence                        @relation(fields: [residenceId], references: [id])
+  recipients     ResidentCommunicationRecipient[]
+
+  @@index([residenceId, createdAt])
+}
+
+model ResidentCommunicationRecipient {
+  id                   Int                                 @id @default(autoincrement())
+  email                String
+  personIds            Int[]
+  residentNames        String[]
+  status               ResidentCommunicationDeliveryStatus @default(PENDING)
+  error                String?
+  sentAt               DateTime?
+  unsubscribeTokenHash String?                             @unique
+  communicationId      Int
+  communication        ResidentCommunication               @relation(fields: [communicationId], references: [id], onDelete: Cascade)
+
+  @@unique([communicationId, email])
+  @@index([communicationId, status])
+}
+
+model ResidentEmailConsentEvent {
+  id           Int                        @id @default(autoincrement())
+  action       ResidentEmailConsentAction
+  email        String
+  source       String
+  createdAt    DateTime                   @default(now())
+  personId     Int
+  recordedById Int?
+  person       Person                     @relation(fields: [personId], references: [id])
+  recordedBy   User?                      @relation("ResidentEmailConsentRecorder", fields: [recordedById], references: [id], onDelete: SetNull)
+
+  @@index([personId, createdAt])
+}
+
+model ResidentInvitation {
+  id          Int       @id @default(autoincrement())
+  email       String
+  tokenHash   String    @unique
+  expiresAt   DateTime
+  acceptedAt  DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  personId    Int
+  createdById Int
+  person      Person    @relation(fields: [personId], references: [id], onDelete: Cascade)
+  createdBy   User      @relation("ResidentInvitationCreator", fields: [createdById], references: [id])
+
+  @@index([personId, expiresAt])
+}
+
+model Delivery {
+  id              Int            @id @default(autoincrement())
+  type            DeliveryType
+  status          DeliveryStatus @default(PENDIENTE)
+  courier         String?
+  description     String?
+  trackingCode    String?
+  notes           String?
+  receivedAt      DateTime       @default(now())
+  deliveredAt     DateTime?
+  deliveredToName String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  personId        Int
+  residenceId     Int            @default(1)
+  receivedById    Int
+  deliveredById   Int?
+  person          Person         @relation(fields: [personId], references: [id])
+  residence       Residence      @relation(fields: [residenceId], references: [id])
+  receivedBy      User           @relation("DeliveryReceived", fields: [receivedById], references: [id])
+  deliveredBy     User?          @relation("DeliveryDelivered", fields: [deliveredById], references: [id])
+
+  @@index([status])
+  @@index([receivedAt])
+  @@index([personId])
 }
