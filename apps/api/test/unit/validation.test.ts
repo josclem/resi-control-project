@@ -37,6 +37,21 @@ describe('validación de reglas de dominio', () => {
     expect(personSchema.safeParse({ ...person, documentTypeId: 1, documentNumber: '123' }).success).toBe(true);
   });
 
+  it('normaliza el correo de la persona y valida el formato', () => {
+    const person = {
+      type: PersonType.RESIDENTE,
+      fullName: 'Ana Pérez',
+      buildingSectionType: BuildingSectionType.TORRE,
+      buildingSectionNumber: '1',
+      apartmentNumber: '101',
+    };
+
+    expect(personSchema.parse({ ...person, email: '  ANA@example.com ' }).email).toBe('ana@example.com');
+    expect(personSchema.safeParse({ ...person, email: 'correo-invalido' }).success).toBe(false);
+    expect(personSchema.parse(person).email).toBeUndefined();
+  });
+
+
   it('normaliza teléfonos colombianos y rechaza longitudes inválidas', () => {
     expect(formatPhone('+57 300-123-4567')).toBe('(+57) 300 123 4567');
     expect(() => formatPhone('123')).toThrow('El teléfono debe tener 10 dígitos para Colombia.');

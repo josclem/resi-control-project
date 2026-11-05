@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react';
+import { apiBaseUrl } from './api';
 
 type Permission = {
   key: string;
@@ -24,6 +25,17 @@ type ManagedUser = {
   active: boolean;
   residenceId: number;
   customRole: { id: number; name: string; active: boolean; permissions: string[] } | null;
+  residentPerson: { fullName: string; apartmentNumber: string } | null;
+};
+
+type ResidentCandidate = {
+  id: number;
+  fullName: string;
+  email: string | null;
+  buildingSectionType: 'TORRE' | 'INTERIOR' | null;
+  buildingSectionNumber: string | null;
+  apartmentNumber: string;
+  pendingInvitation: { email: string; expiresAt: string } | null;
 };
 
 const roleLabels: Record<ManagedUser['role'], string> = {
@@ -63,7 +75,7 @@ function headers(json = false) {
 }
 
 async function request(path: string, init?: RequestInit) {
-  const response = await fetch(`http://localhost:4000${path}`, {
+  const response = await fetch(`${apiBaseUrl}${path}`, {
     ...init,
     headers: new Headers(init?.headers ?? headers()),
   });
@@ -81,9 +93,10 @@ export function UserAdministration({
   currentUserId: number;
 }) {
   const [users, setUsers] = useState<ManagedUser[]>([]);
+  const [residentCandidates, setResidentCandidates] = useState<ResidentCandidate[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
   const [permissions, setPermissions] = useState<Permission[]>([]);
-  const [tab, setTab] = useState<'users' | 'roles'>('users');
+  const [tab, setTab] = useState<'users' | 'roles' | 'resident-invitations'>('users');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [saving, setSaving] = useState(false);
@@ -96,21 +109,50 @@ export function UserAdministration({
   const [editingRoleId, setEditingRoleId] = useState<number | null>(null);
   const [roleName, setRoleName] = useState('');
   const [rolePermissions, setRolePermissions] = useState<string[]>([]);
+  const [residentPersonId, setResidentPersonId] = useState('');
+  const [residentEmail, setResidentEmail] = useState('');
   const assignableCustomRoles = roles.filter((role) => !role.system && role.active && role.assignable && role.id !== null);
   const canAssignUserRole = roles.some((role) => role.system && role.assignable) || assignableCustomRoles.length > 0;
   const isEditingSuperAdmin = Boolean(editingUserId && users.find((user) => user.id === editingUserId)?.role === 'SUPER_ADMINISTRADOR');
 
   async function load() {
-    const [usersResponse, rolesResponse] = await Promise.all([
+    const [usersResponse, rolesResponse, residentsResponse] = await Promise.all([
       request('/api/admin/users'),
       request('/api/admin/roles'),
+      request('/api/admin/resident-invitations/candidates'),
     ]);
     if (!usersResponse.ok) throw new Error('No se pudieron consultar los usuarios.');
     if (!rolesResponse.ok) throw new Error('No se pudieron consultar los roles.');
-    const [loadedUsers, roleData] = await Promise.all([usersResponse.json(), rolesResponse.json()]);
+    if (!residentsResponse.ok) throw new Error('No se pudieron consultar los residentes para invitar.');
+    const [loadedUsers, roleData, loadedResidents] = await Promise.all([usersResponse.json(), rolesResponse.json(), residentsResponse.json()]);
     setUsers(loadedUsers);
+    setResidentCandidates(loadedResidents);
     setRoles(roleData.roles);
     setPermissions(roleData.permissions.map((key: string) => ({ key, name: permissionLabels[key] ?? key })));
+  }
+
+  async function inviteResident(event: FormEvent) {
+    event.preventDefault();
+    setSaving(true);
+    setError('');
+    setNotice('');
+    try {
+      const response = await request('/api/admin/resident-invitations', {
+        method: 'POST',
+        headers: headers(true),
+        body: JSON.stringify({ personId: Number(residentPersonId), email: residentEmail }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.message ?? 'No se pudo enviar la invitación.');
+      setResidentPersonId('');
+      setResidentEmail('');
+      setNotice(`Invitación enviada a ${data.email}. El enlace vence en 48 horas.`);
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'No se pudo enviar la invitación.');
+    } finally {
+      setSaving(false);
+    }
   }
 
   useEffect(() => {
@@ -230,6 +272,7 @@ export function UserAdministration({
     {notice && <div className="success">{notice}</div>}
     <div className="delivery-filters">
       <button type="button" className={tab === 'users' ? 'active-nav' : 'secondary'} onClick={() => setTab('users')}>Usuarios</button>
+      <button type="button" className={tab === 'resident-invitations' ? 'active-nav' : 'secondary'} onClick={() => setTab('resident-invitations')}>Invitar residente</button>
       {canManageRoles && <button type="button" className={tab === 'roles' ? 'active-nav' : 'secondary'} onClick={() => setTab('roles')}>Roles</button>}
     </div>
     {tab === 'users' && <>
@@ -244,10 +287,26 @@ export function UserAdministration({
       <div className="table admin-user-table">
         <div className="row admin-user-row heading"><span>Usuario</span><span>Rol</span><span>Estado</span><span>Acciones</span></div>
         {users.map((user) => <div className="row admin-user-row" key={user.id}>
-          <span><strong>{user.name}</strong><small>{user.email}</small></span>
+          <span><strong>{user.name}</strong><small>{user.email}{user.residentPerson ? ` · ${user.residentPerson.fullName}, apto. ${user.residentPerson.apartmentNumber}` : ''}</small></span>
           <span>{user.customRole?.name ?? roleLabels[user.role]}</span>
           <span>{user.active ? 'Activo' : 'Inactivo'}</span>
-          <span className="admin-actions">{(user.role !== 'SUPER_ADMINISTRADOR' || isSuperAdmin) && <button type="button" className="small-button" onClick={() => editUser(user)}>Editar</button>}{(user.role !== 'SUPER_ADMINISTRADOR' || isSuperAdmin) && user.id !== currentUserId && <button type="button" className="small-button secondary" onClick={() => void setUserActive(user, !user.active)}>{user.active ? 'Desactivar' : 'Reactivar'}</button>}</span>
+          <span className="admin-actions">{user.role !== 'RESIDENTE' && (user.role !== 'SUPER_ADMINISTRADOR' || isSuperAdmin) && <button type="button" className="small-button" onClick={() => editUser(user)}>Editar</button>}{(user.role !== 'SUPER_ADMINISTRADOR' || isSuperAdmin) && user.id !== currentUserId && <button type="button" className="small-button secondary" onClick={() => void setUserActive(user, !user.active)}>{user.active ? 'Desactivar' : 'Reactivar'}</button>}</span>
+        </div>)}
+      </div>
+    </>}
+    {tab === 'resident-invitations' && <>
+      <p>La administración invita a una persona residente ya registrada. La cuenta se activa cuando el residente crea su contraseña desde el enlace enviado a su correo.</p>
+      <form className="form-grid" onSubmit={inviteResident}>
+        <label>Residente<select required value={residentPersonId} onChange={(event) => { const person = residentCandidates.find((candidate) => String(candidate.id) === event.target.value); setResidentPersonId(event.target.value); setResidentEmail(person?.email ?? ''); }}><option value="">Selecciona un residente</option>{residentCandidates.map((person) => <option key={person.id} value={person.id}>{person.fullName} · {person.buildingSectionType === 'TORRE' ? 'Torre' : person.buildingSectionType === 'INTERIOR' ? 'Interior' : 'Sector'} {person.buildingSectionNumber ?? ''} · Apto. {person.apartmentNumber}{person.email ? ` · ${person.email}` : ''}{person.pendingInvitation ? ` · Invitación pendiente: ${person.pendingInvitation.email}` : ''}</option>)}</select></label>
+        <label>Correo del residente<input required type="email" maxLength={254} value={residentEmail} onChange={(event) => setResidentEmail(event.target.value)} /></label>
+        <div className="form-full admin-form-actions"><button disabled={saving || !residentCandidates.length}>{saving ? 'Enviando...' : 'Enviar invitación'}</button>{!residentCandidates.length && <small>No hay residentes activos disponibles para invitar.</small>}</div>
+      </form>
+      <div className="table admin-user-table">
+        <div className="row admin-user-row heading"><span>Residente</span><span>Apartamento</span><span>Invitación pendiente</span></div>
+        {residentCandidates.map((person) => <div className="row admin-user-row" key={person.id}>
+          <strong>{person.fullName}</strong>
+          <span>{person.buildingSectionType === 'TORRE' ? 'Torre' : person.buildingSectionType === 'INTERIOR' ? 'Interior' : 'Sector'} {person.buildingSectionNumber ?? ''} · Apto. {person.apartmentNumber} · {person.email ?? 'Sin correo registrado'}</span>
+          <span>{person.pendingInvitation ? `${person.pendingInvitation.email} · vence ${new Date(person.pendingInvitation.expiresAt).toLocaleString()}` : 'Sin invitación activa'}</span>
         </div>)}
       </div>
     </>}

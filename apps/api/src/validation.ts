@@ -3,6 +3,14 @@ import { z } from 'zod';
 import { permissions } from './permissions.js';
 
 export const loginSchema = z.object({ email: z.string().email(), password: z.string().min(1) });
+export const residentInvitationSchema = z.object({
+  personId: z.number().int().positive(),
+  email: z.string().trim().email().max(254).transform((value) => value.toLowerCase()),
+});
+export const residentInvitationAcceptanceSchema = z.object({
+  token: z.string().min(40).max(200),
+  password: z.string().min(12).max(128),
+});
 export const accessSchema = z.object({
   personId: z.number().int().positive(),
   vehicleId: z.number().int().positive().optional(),
@@ -35,6 +43,7 @@ export const personSchema = z.object({
   documentTypeId: z.number().int().positive().optional(),
   documentNumber: z.string().trim().min(1).optional(),
   phone: z.string().trim().optional(),
+  email: z.string().trim().email().max(254).transform((value) => value.toLowerCase()).nullable().optional(),
   biometricRef: z.string().trim().optional(),
 }).superRefine((value, context) => {
   if (value.documentNumber && !value.documentTypeId) {

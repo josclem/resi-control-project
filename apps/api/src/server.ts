@@ -1,4 +1,5 @@
 import express, { NextFunction, Request, Response } from 'express';
+import { createHash, randomBytes } from 'node:crypto';
 import multer from 'multer';
 import cors from 'cors';
 import jwt from 'jsonwebtoken';
@@ -16,6 +17,8 @@ import {
   irregularAccessModeSchema,
   loginSchema,
   personSchema,
+  residentInvitationAcceptanceSchema,
+  residentInvitationSchema,
   residenceSchema,
   supervisorSchema,
   vehicleSchema,
@@ -26,8 +29,10 @@ import {
   formatPhone,
   normalizeDocumentNumber,
 } from './validation.js';
+import { createResidentInvitationMailer, ResidentInvitationMailer } from './resident-invitation-email.js';
 
-type AuthenticatedRequest = Request & { user?: { id: number; role: UserRole; residenceId: number; permissions: Permission[]; roleName: string } };
+type AuthenticatedRequest = Request & { user?: { id: number; role: UserRole; residenceId: number; residentPersonId: number | null; permissions: Permission[]; roleName: string } };
+
 
 function createRequireAuth(prisma: PrismaClient, jwtSecret: string) {
   return async function requireAuth(req: AuthenticatedRequest, res: Response, next: NextFunction) {
@@ -42,6 +47,7 @@ function createRequireAuth(prisma: PrismaClient, jwtSecret: string) {
           id: true,
           role: true,
           residenceId: true,
+          residentPersonId: true,
           customRoleId: true,
           active: true,
           customRole: { select: { id: true, name: true, permissions: true, active: true } },
@@ -70,6 +76,7 @@ function createRequireAuth(prisma: PrismaClient, jwtSecret: string) {
         id: user.id,
         role: user.role,
         residenceId,
+        residentPersonId: user.residentPersonId,
         permissions: permissionsForRole(user.role, user.customRole?.permissions ?? []),
         roleName: user.customRole?.name ?? user.role,
       };
@@ -80,7 +87,11 @@ function createRequireAuth(prisma: PrismaClient, jwtSecret: string) {
   };
 }
 
-export function createApp(prisma: PrismaClient, jwtSecret: string) {
+export function createApp(
+  prisma: PrismaClient,
+  jwtSecret: string,
+  residentInvitationMailer: ResidentInvitationMailer = createResidentInvitationMailer(),
+) {
   if (!jwtSecret) throw new Error('JWT_SECRET es obligatorio');
 
   const app = express();
@@ -300,6 +311,51 @@ app.post('/api/auth/login', async (req, res, next) => {
   }
 });
 
+app.post('/api/auth/resident-invitation/accept', async (req, res, next) => {
+  try {
+    const parsed = residentInvitationAcceptanceSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ message: 'El enlace o la contraseña no son válidos.' });
+    const { token, password } = parsed.data;
+    const tokenHash = createHash('sha256').update(token).digest('hex');
+    const invitation = await prisma.residentInvitation.findFirst({
+      where: { tokenHash, acceptedAt: null, revokedAt: null, expiresAt: { gt: new Date() } },
+      include: { person: { include: { residence: true } } },
+    });
+    if (!invitation || invitation.person.type !== PersonType.RESIDENTE || !invitation.person.active || !invitation.person.residence.active) {
+      return res.status(410).json({ message: 'La invitación venció o ya no está disponible. Solicita una nueva a la administración.' });
+    }
+
+    const passwordHash = await bcrypt.hash(password, 12);
+    const user = await prisma.$transaction(async (transaction) => {
+      const consumed = await transaction.residentInvitation.updateMany({
+        where: { id: invitation.id, acceptedAt: null, revokedAt: null, expiresAt: { gt: new Date() } },
+        data: { acceptedAt: new Date() },
+      });
+      if (consumed.count !== 1) throw new Error('RESIDENT_INVITATION_ALREADY_USED');
+      return transaction.user.create({
+        data: {
+          name: invitation.person.fullName,
+          email: invitation.email,
+          passwordHash,
+          role: UserRole.RESIDENTE,
+          residenceId: invitation.person.residenceId,
+          residentPersonId: invitation.personId,
+        },
+        select: { id: true, name: true, email: true },
+      });
+    });
+    return res.status(201).json({ user });
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'P2002') {
+      return res.status(409).json({ message: 'Ya existe una cuenta vinculada a este residente o correo.' });
+    }
+    if (error instanceof Error && error.message === 'RESIDENT_INVITATION_ALREADY_USED') {
+      return res.status(410).json({ message: 'La invitación ya se utilizó. Inicia sesión o solicita una nueva.' });
+    }
+    return next(error);
+  }
+});
+
 const userResponse = {
   id: true,
   name: true,
@@ -310,6 +366,7 @@ const userResponse = {
   residenceId: true,
   createdAt: true,
   customRole: { select: { id: true, name: true, active: true, permissions: true } },
+  residentPerson: { select: { fullName: true, apartmentNumber: true } },
 };
 
 function isAdministratorRole(role: { role: UserRole; customRole?: { permissions: string[] } | null }) {
@@ -435,6 +492,101 @@ app.get('/api/admin/users', requireAuth, requirePermission('USERS_MANAGE'), asyn
       permissionsForRole(user.role, user.customRole?.permissions ?? []),
     )));
   } catch (error) { return next(error); }
+});
+
+app.get('/api/admin/resident-invitations/candidates', requireAuth, requirePermission('USERS_MANAGE'), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const people = await prisma.person.findMany({
+      where: {
+        residenceId: req.user!.residenceId,
+        type: PersonType.RESIDENTE,
+        active: true,
+        residentUser: null,
+      },
+      select: {
+        id: true,
+        fullName: true,
+        email: true,
+        buildingSectionType: true,
+        buildingSectionNumber: true,
+        apartmentNumber: true,
+        residentInvitations: {
+          where: { acceptedAt: null, revokedAt: null, expiresAt: { gt: new Date() } },
+          select: { email: true, expiresAt: true },
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+        },
+      },
+      orderBy: [{ buildingSectionNumber: 'asc' }, { apartmentNumber: 'asc' }, { fullName: 'asc' }],
+    });
+    return res.json(people.map(({ residentInvitations, ...person }) => ({
+      ...person,
+      pendingInvitation: residentInvitations[0] ?? null,
+    })));
+  } catch (error) { return next(error); }
+});
+
+app.post('/api/admin/resident-invitations', requireAuth, requirePermission('USERS_MANAGE'), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const parsed = residentInvitationSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ message: 'Selecciona un residente e indica un correo válido.' });
+    let configured: boolean;
+    try {
+      configured = residentInvitationMailer.isConfigured();
+    } catch (error) {
+      return next(error);
+    }
+    if (!configured) return res.status(503).json({ message: 'El correo aún no está configurado. Completa SMTP en apps/api/.env.' });
+
+    const { personId, email } = parsed.data;
+    const person = await prisma.person.findFirst({
+      where: { id: personId, residenceId: req.user!.residenceId, type: PersonType.RESIDENTE, active: true },
+      include: { residentUser: { select: { id: true } }, residence: { select: { name: true, active: true } } },
+    });
+    if (!person || !person.residence.active) return res.status(404).json({ message: 'Residente no encontrado o inactivo.' });
+    if (person.residentUser) return res.status(409).json({ message: 'Este residente ya tiene una cuenta vinculada.' });
+    if (await prisma.user.findUnique({ where: { email }, select: { id: true } })) {
+      return res.status(409).json({ message: 'Este correo ya está asociado a una cuenta.' });
+    }
+    const otherPendingInvitation = await prisma.residentInvitation.findFirst({
+      where: { personId: { not: personId }, email, acceptedAt: null, revokedAt: null, expiresAt: { gt: new Date() } },
+      select: { id: true },
+    });
+    if (otherPendingInvitation) return res.status(409).json({ message: 'Este correo ya tiene una invitación pendiente para otro residente.' });
+
+    const token = randomBytes(32).toString('hex');
+    const tokenHash = createHash('sha256').update(token).digest('hex');
+    const expiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000);
+    const invitation = await prisma.$transaction(async (transaction) => {
+      await transaction.residentInvitation.updateMany({
+        where: { personId, acceptedAt: null, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+      await transaction.person.update({ where: { id: personId }, data: { email } });
+      return transaction.residentInvitation.create({
+        data: { personId, email, tokenHash, expiresAt, createdById: req.user!.id },
+        select: { id: true, email: true, expiresAt: true },
+      });
+    });
+
+    const appUrl = new URL(process.env.WEB_APP_URL ?? 'http://localhost:5173');
+    appUrl.hash = new URLSearchParams({ invite: token }).toString();
+    try {
+      await residentInvitationMailer.sendInvitation({
+        email,
+        residentName: person.fullName,
+        residenceName: person.residence.name,
+        url: appUrl.toString(),
+      });
+    } catch (error) {
+      console.error('No se pudo enviar una invitación de residente.', error);
+      await prisma.residentInvitation.update({ where: { id: invitation.id }, data: { revokedAt: new Date() } });
+      return res.status(502).json({ message: 'No se pudo enviar el correo. Revisa la configuración y vuelve a intentar.' });
+    }
+    return res.status(201).json({ email: invitation.email, expiresAt: invitation.expiresAt });
+  } catch (error) {
+    return next(error);
+  }
 });
 
 app.post('/api/admin/users', requireAuth, requirePermission('USERS_MANAGE'), async (req: AuthenticatedRequest, res, next) => {

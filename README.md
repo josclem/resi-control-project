@@ -23,6 +23,31 @@ La gestión de usuarios y roles permite crear, editar y desactivar cuentas, y ad
 
 La API queda en `http://localhost:4000` y el frontend en `http://localhost:5173`.
 
+## Invitaciones de residentes por Gmail
+
+La administración puede invitar por correo a una persona residente que ya esté registrada. La ficha del residente guarda su correo de contacto y el formulario de invitación lo prellena; al invitar o reenviar, la dirección utilizada se actualiza en la ficha. El enlace es de un solo uso y vence en 48 horas; el residente define su propia contraseña y queda asociado a ese registro de persona y residencia. La invitación no concede permisos administrativos. Las cuentas activadas pueden iniciar sesión en el portal de residentes.
+
+Para Gmail:
+
+1. Activa la verificación en dos pasos en la cuenta que enviará los mensajes.
+2. Crea una **contraseña de aplicación** desde la configuración de seguridad de Google. Usa esa contraseña, no la contraseña normal de Gmail. Google puede no ofrecer esta opción en cuentas administradas o protegidas con Advanced Protection.
+3. Completa las variables en `apps/api/.env`:
+
+   ```dotenv
+   WEB_APP_URL="http://localhost:5173"
+   SMTP_HOST="smtp.gmail.com"
+   SMTP_PORT=465
+   SMTP_SECURE=true
+   SMTP_USER="tu-cuenta@gmail.com"
+   SMTP_APP_PASSWORD="contraseña-de-aplicación"
+   EMAIL_FROM="Resi Control <tu-cuenta@gmail.com>"
+   ```
+
+   `SMTP_USER` y el correo de `EMAIL_FROM` deben pertenecer a la cuenta Gmail autorizada. En este proyecto la cuenta remitente es `tu-cuenta@gmail.com`. Mantén `.env` fuera de Git y no compartas ni registres la contraseña de aplicación.
+4. Reinicia la API después de cambiar `.env`.
+
+`http://localhost:5173` solo sirve para probar el enlace en el mismo equipo donde corre la aplicación. Antes de invitar residentes reales, publica el frontend y la API bajo HTTPS; configura `WEB_APP_URL` y `WEB_ORIGIN` en `apps/api/.env`, y `VITE_API_URL` en `apps/web/.env` antes de compilar el frontend. Luego se puede cambiar Gmail por un proveedor SMTP del dominio propio sin cambiar el flujo de invitación.
+
 ## Pruebas automatizadas
 
 Desde la raíz del proyecto:

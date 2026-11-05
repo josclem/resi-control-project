@@ -78,6 +78,8 @@ model User {
   createdAt    DateTime @default(now())
   residenceId  Int      @default(1)
   residence    Residence @relation(fields: [residenceId], references: [id])
+  residentPersonId Int? @unique
+  residentPerson Person? @relation("ResidentAccount", fields: [residentPersonId], references: [id])
   customRoleId Int?
   customRole   CustomRole? @relation("UserCustomRole", fields: [customRoleId], references: [id])
   accessLogs   AccessLog[]
@@ -85,6 +87,7 @@ model User {
   receivedDeliveries Delivery[] @relation("DeliveryReceived")
   deliveredDeliveries Delivery[] @relation("DeliveryDelivered")
   customRolesCreated CustomRole[] @relation("CustomRoleCreator")
+  residentInvitationsCreated ResidentInvitation[] @relation("ResidentInvitationCreator")
 }
 
 model CustomRole {
@@ -115,6 +118,7 @@ model Person {
   buildingSectionNumber String?
   apartmentNumber  String
   phone            String?
+  email String?
   biometricRef     String?    @unique
   active           Boolean    @default(true)
   createdAt        DateTime   @default(now())
@@ -126,6 +130,8 @@ model Person {
   documentType     DocumentType? @relation(fields: [documentTypeId], references: [id])
   photo            PersonPhoto?
   deliveries       Delivery[]
+  residentUser User? @relation("ResidentAccount")
+  residentInvitations ResidentInvitation[]
 
   @@index([fullName])
   @@index([apartmentNumber])
@@ -243,4 +249,20 @@ model Delivery {
   @@index([status])
   @@index([receivedAt])
   @@index([personId])
+}
+
+model ResidentInvitation {
+  id          Int       @id @default(autoincrement())
+  email       String
+  tokenHash   String    @unique
+  expiresAt   DateTime
+  acceptedAt  DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  personId    Int
+  createdById Int
+  person      Person    @relation(fields: [personId], references: [id], onDelete: Cascade)
+  createdBy   User      @relation("ResidentInvitationCreator", fields: [createdById], references: [id])
+
+  @@index([personId, expiresAt])
 }
