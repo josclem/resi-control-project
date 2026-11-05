@@ -1,11 +1,11 @@
 # Estado y roadmap de Resi Control
 
 ## Fecha de referencia
-- 2026-11-03
+- 2026-11-05
 
 ## Resumen ejecutivo
 
-Resi Control ya tiene una base funcional para control de acceso, personas, vehículos y encomiendas. También cuenta con un portal web acotado para residentes: activación de cuenta, consulta del perfil y de sus encomiendas, y administración del consentimiento para futuros avisos por WhatsApp. La integración actual de WhatsApp se usa para la activación del portal; no envía todavía notificaciones operativas.
+Resi Control ya cuenta con control de acceso, personas, vehículos y encomiendas, además de un portal web para residentes. La administración de usuarios y roles, las invitaciones por correo y los prerregistros de visitas están implementados e integrados en `main` mediante los PR #10 y #12. La validación manual de los nuevos flujos de visitas y un piloto con personal de portería siguen pendientes.
 
 La revisión de mercado compartida por el usuario muestra una oportunidad para completar primero los flujos básicos que hoy se resuelven por otros canales y, después, diferenciar el producto con automatización e IA. Esa revisión se usa como insumo de producto, no como validación independiente de cada afirmación sobre competidores. Antes de iniciar cada módulo se deben validar necesidad, reglas de negocio, viabilidad, costos y obligaciones legales con conjuntos piloto.
 
@@ -16,21 +16,22 @@ La prioridad inmediata sigue siendo estabilidad, trazabilidad y cierre de los fl
 ### Implementado
 
 - API web y frontend React/TypeScript, PostgreSQL y Prisma.
-- Autenticación, separación de privilegios y aislamiento de datos por residencia; administración configurable de usuarios y roles en desarrollo dentro de la Fase 1.
+- Autenticación, separación de privilegios y aislamiento de datos por residencia; administración configurable de usuarios y roles.
 - Registro de residentes y visitantes, datos de ubicación, vehículos asociados y gestión de fotografías.
 - Registro de entradas y salidas, búsqueda manual, códigos QR y de barras, reglas para movimientos repetidos y autorización de supervisor.
 - Registro, seguimiento y cierre de encomiendas en portería, con historial de recepción y entrega.
-- Portal web de residentes para activar cuenta, consultar perfil y encomiendas, y gestionar consentimiento de notificaciones.
-- Solicitud de activación del portal por WhatsApp con verificación del webhook. Esto no equivale a notificaciones de visitas o encomiendas.
+- Portal web de residentes, activación por invitación de correo y consulta de perfil y encomiendas.
+- Prerregistro de visitas por residentes, con vigencia configurable, cancelación antes del ingreso y estados de vencimiento.
+- Registro en portería de visitas autorizadas, incluidas las autorizadas externamente, con origen y operador auditados y movimientos vinculados.
 - Dashboard básico y endpoint de reportes de accesos. La cobertura de reportes operativos sigue siendo parcial.
 - Pruebas unitarias y de integración y validaciones de CI para los flujos críticos existentes.
 
 ### Parcial o pendiente
 
-- **Visitas:** portería registra accesos y hay códigos QR de identificación para personas y vehículos; no existe pre-registro de invitados con QR temporal, vigencia y validación al llegar.
-- **Notificaciones:** hay invitaciones de portal por WhatsApp y consentimiento registrado; faltan avisos automáticos de visitas y encomiendas, trazabilidad de entrega y manejo de errores.
+- **Visitas:** el prerregistro web y el flujo de portería están implementados. Falta validarlos manualmente con vigilantes y administradores y comprobar su operación en un piloto. No se debe confundir este flujo con una invitación QR temporal: los QR actuales son credenciales permanentes de `accessCode`.
+- **Notificaciones:** las invitaciones del portal se envían por correo SMTP; faltan avisos operativos automáticos de visitas y encomiendas, con trazabilidad de entrega y manejo de errores.
 - **Encomiendas:** flujo básico de recepción/entrega implementado; faltan aviso automático al residente, evidencia de entrega configurable y reportes completos.
-- **Residentes y usuarios:** la primera implementación de administración de usuarios y roles está en curso en la rama `feature/user-role-management`. Incluye SuperAdministrador global, selector de residencia, permisos granulares y desactivación conservando el historial. Quedan pendientes la validación funcional de interfaz y los incrementos de producto siguientes. También falta modelar, si el negocio lo requiere, relaciones de propietario, arrendatario y familiares autorizados.
+- **Residentes y usuarios:** la administración de usuarios y roles está implementada, incluida la selección global de residencia, permisos granulares y desactivación conservando el historial. Queda por validar su uso continuo en un piloto. Si el negocio lo requiere, falta modelar relaciones de propietario, arrendatario y familiares autorizados.
 - **Parqueaderos:** se registra el vehículo del residente, pero no hay asignación/control de cupos, permisos de parqueadero ni operación de parqueaderos de visitantes.
 - **Reportes:** existe un endpoint de accesos, pero falta una experiencia integral de reportes con filtros y cobertura de encomiendas, PQRS e incidencias.
 - **Aplicación móvil:** existe una aplicación web; no hay una app nativa. Primero se debe validar si el portal web móvil cubre las necesidades.
@@ -82,16 +83,18 @@ Las fases representan dependencias y orden de producto, no fechas comprometidas.
 **Objetivo:** reducir llamadas y coordinación manual en los flujos cotidianos de visitas, paquetes y comunicación.
 
 **Trabajo, en este orden:**
-- Completar primero la administración segura de usuarios y roles: SuperAdministrador global, selección de residencia, permisos granulares, alcance por residencia, límites contra la elevación de privilegios y desactivación que conserva el historial.
-- Completar avisos transaccionales al residente por encomienda y visita, inicialmente mediante un canal validado con conjuntos piloto. Reutilizar WhatsApp solo con consentimiento y requisitos de Meta cubiertos; considerar correo u otro canal como alternativa.
-- Implementar pre-registro de visitas desde el portal web: datos mínimos, persona/vehículo, anfitrión, vigencia, cancelación y estados.
-- Generar QR de invitación temporal y de un solo uso o con reglas explícitas de reutilización; validarlo en portería y registrar entrada/salida sin confundirlo con los QR permanentes de `accessCode`.
+- [x] Completar la administración segura de usuarios y roles: SuperAdministrador global, selección de residencia, permisos granulares, límites contra la elevación de privilegios y desactivación que conserva el historial.
+- [x] Implementar invitaciones por correo y el portal de residentes.
+- [x] Implementar prerregistro de visitas y el registro de portería con estados y movimientos vinculados.
+- Validar manualmente en navegador los flujos de residente y portería y probarlos con un conjunto piloto.
+- Definir si se necesita QR temporal para invitaciones; no está implementado y no debe confundirse con los QR permanentes de `accessCode`.
+- Completar avisos transaccionales al residente por encomienda y visita mediante un canal validado con conjuntos piloto. Reutilizar WhatsApp solo con consentimiento y requisitos de Meta cubiertos; considerar correo u otro canal.
 - Completar el flujo de encomiendas con evidencia de entrega configurable, permisos de acceso a la evidencia y registro de eventos de notificación.
 - Añadir un canal de comunicados con audiencia, publicación, vigencia y confirmación de lectura si los pilotos la requieren.
 - Implementar PQRS con categorías, responsable, estados, vencimientos, comentarios visibles/internos y trazabilidad.
 - Verificar que el portal funcione bien en móvil antes de decidir si se requiere una aplicación nativa.
 
-**Estado de la primera entrega:** en curso en `feature/user-role-management`. El esquema, catálogo de permisos, middleware/rutas protegidas, selector de residencia y pantallas de usuarios/roles están implementados. Build de API/web, 11 pruebas unitarias y 14 de integración pasan; las pruebas de integración usan exclusivamente `resi_control_test`. La validación inicial en navegador cubrió el selector de residencia y la creación de un rol personalizado y una cuenta asignada a él. Falta recorrer en interfaz la edición/desactivación y cerrar el PR antes de dar esta entrega por terminada.
+**Estado de la primera entrega:** administración de usuarios y roles integrada en [PR #10](https://github.com/josclem/resi-control-project/pull/10). Las invitaciones por correo y los prerregistros de visitas se integraron en `main` mediante [PR #12](https://github.com/josclem/resi-control-project/pull/12), que incluyó [PR #11](https://github.com/josclem/resi-control-project/pull/11). El build y las suites registradas en el contexto del proyecto pasan; la validación manual en navegador de los nuevos flujos de visitas y el piloto siguen pendientes.
 
 **Criterio de salida:** residentes pueden usar los flujos acordados desde móvil; portería puede validar visitas pre-registradas; avisos y cambios de estado son auditables; permisos y consentimiento tienen pruebas.
 
@@ -149,12 +152,12 @@ Las fases representan dependencias y orden de producto, no fechas comprometidas.
 
 ## Siguiente trabajo recomendado
 
-1. Cerrar y sostener la Fase 0: validación funcional de flujos críticos y pruebas automatizadas.
-2. Diseñar el modelo de notificaciones (eventos, consentimiento, canal, reintentos, auditoría y bajas) y validarlo con administradores/residentes.
-3. Especificar y luego implementar pre-registro de visitas con QR temporal, incluyendo estados, vencimiento, cancelación y operación sin conectividad si aplica.
-4. Completar avisos y evidencia de encomiendas.
-5. Refinar el alcance de usuarios/unidades (propietario, arrendatario, familiares autorizados) y construir los módulos de comunicados y PQRS según necesidad validada.
-6. Después de estabilizar esos flujos, planear reservas, parqueaderos, reportes, documentos y contratistas.
+1. Validar en navegador los flujos de prerregistro y portería; luego probarlos con vigilantes y administradores y conseguir un conjunto para piloto.
+2. Definir la zona horaria oficial de la residencia antes de operar en varias regiones y publicar frontend y API bajo HTTPS antes de invitar residentes reales.
+3. Diseñar y validar las notificaciones operativas (eventos, consentimiento, canal, reintentos, auditoría y bajas).
+4. Priorizar reportes de accesos y encomiendas según los resultados del piloto; definir también si se requiere evidencia al entregar encomiendas.
+5. Probar QR y código de barras con hardware adecuado cuando esté disponible; la cámara actual permanece pausada.
+6. Refinar el alcance de usuarios/unidades y planear comunicados, PQRS y otros módulos según necesidad validada.
 
 ## Criterios de “done” para toda fase
 
@@ -180,4 +183,4 @@ Una fase solo se considera cerrada cuando:
 
 ## Resumen
 
-El producto ya resuelve una parte importante de la operación de portería y dispone de una primera experiencia de portal residente. La brecha inmediata no es añadir IA: es completar avisos, pre-registro de visitas, PQRS, comunicados y evidencia, y luego cubrir la administración integral del conjunto. La IA constituye una fase posterior de diferenciación, condicionada por datos confiables, privacidad y supervisión humana.
+El producto ya resuelve una parte importante de la operación de portería y cuenta con portal residente, invitaciones por correo y prerregistros de visitas. La brecha inmediata es validar estos flujos con usuarios reales, definir notificaciones y priorizar reportes y evidencia con base en un piloto. La IA constituye una fase posterior, condicionada por datos confiables, privacidad y supervisión humana.
