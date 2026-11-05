@@ -17,8 +17,10 @@ import {
   irregularAccessModeSchema,
   loginSchema,
   personSchema,
+  porterVisitCreateSchema,
   residentInvitationAcceptanceSchema,
   residentInvitationSchema,
+  residentVisitCreateSchema,
   residenceSchema,
   supervisorSchema,
   vehicleSchema,
@@ -33,6 +35,16 @@ import { createResidentInvitationMailer, ResidentInvitationMailer } from './resi
 
 type AuthenticatedRequest = Request & { user?: { id: number; role: UserRole; residenceId: number; residentPersonId: number | null; permissions: Permission[]; roleName: string } };
 
+export async function markExpiredVisits(prisma: PrismaClient, residenceId?: number) {
+  await prisma.visitPreRegistration.updateMany({
+    where: {
+      status: 'AUTORIZADA',
+      validUntil: { lte: new Date() },
+      ...(residenceId ? { residenceId } : {}),
+    },
+    data: { status: 'NOSHOW' },
+  });
+}
 
 function createRequireAuth(prisma: PrismaClient, jwtSecret: string) {
   return async function requireAuth(req: AuthenticatedRequest, res: Response, next: NextFunction) {
@@ -354,6 +366,242 @@ app.post('/api/auth/resident-invitation/accept', async (req, res, next) => {
     }
     return next(error);
   }
+});
+
+const visitRelations = {
+  resident: { select: { id: true, fullName: true, buildingSectionType: true, buildingSectionNumber: true, apartmentNumber: true } },
+  visitor: { select: { id: true, fullName: true, documentNumber: true } },
+  createdBy: { select: { id: true, name: true } },
+  accessLogs: { select: { id: true, accessType: true, occurredAt: true }, orderBy: { occurredAt: 'asc' as const } },
+};
+
+app.get('/api/resident/visits', requireAuth, async (req: AuthenticatedRequest, res, next) => {
+  try {
+    if (req.user!.role !== UserRole.RESIDENTE || !req.user!.residentPersonId) {
+      return res.status(403).json({ message: 'Esta función es solo para cuentas de residentes.' });
+    }
+    await markExpiredVisits(prisma, req.user!.residenceId);
+    const visits = await prisma.visitPreRegistration.findMany({
+      where: { residenceId: req.user!.residenceId, residentPersonId: req.user!.residentPersonId },
+      orderBy: [{ validFrom: 'desc' }, { createdAt: 'desc' }],
+      take: 100,
+      include: visitRelations,
+    });
+    return res.json(visits);
+  } catch (error) { return next(error); }
+});
+
+app.post('/api/resident/visits', requireAuth, async (req: AuthenticatedRequest, res, next) => {
+  try {
+    if (req.user!.role !== UserRole.RESIDENTE || !req.user!.residentPersonId) {
+      return res.status(403).json({ message: 'Esta función es solo para cuentas de residentes.' });
+    }
+    const parsed = residentVisitCreateSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ message: parsed.error.issues[0]?.message ?? 'Datos de visita inválidos.' });
+    if (new Date(parsed.data.validFrom).getTime() < Date.now() - 60_000 || new Date(parsed.data.validUntil) <= new Date()) {
+      return res.status(400).json({ message: 'La vigencia de la visita debe iniciar ahora o en el futuro y terminar más adelante.' });
+    }
+    const resident = await prisma.person.findFirst({
+      where: { id: req.user!.residentPersonId, residenceId: req.user!.residenceId, type: PersonType.RESIDENTE, active: true },
+      select: { id: true },
+    });
+    if (!resident) return res.status(403).json({ message: 'El registro del residente está inactivo.' });
+    const visit = await prisma.visitPreRegistration.create({
+      data: {
+        ...parsed.data,
+        visitorDocumentNumber: parsed.data.visitorDocumentNumber || null,
+        observations: parsed.data.observations || null,
+        vehiclePlate: parsed.data.vehiclePlate?.replace(/[\s-]/g, '').toUpperCase() || null,
+        validFrom: new Date(parsed.data.validFrom),
+        validUntil: new Date(parsed.data.validUntil),
+        origin: 'RESIDENTE',
+        residentPersonId: resident.id,
+        createdById: req.user!.id,
+        residenceId: req.user!.residenceId,
+      },
+      include: visitRelations,
+    });
+    return res.status(201).json(visit);
+  } catch (error) { return next(error); }
+});
+
+app.patch('/api/resident/visits/:id/cancel', requireAuth, async (req: AuthenticatedRequest, res, next) => {
+  try {
+    if (req.user!.role !== UserRole.RESIDENTE || !req.user!.residentPersonId) {
+      return res.status(403).json({ message: 'Esta función es solo para cuentas de residentes.' });
+    }
+    const id = Number(req.params.id);
+    if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ message: 'Identificador de visita inválido.' });
+    await markExpiredVisits(prisma, req.user!.residenceId);
+    const result = await prisma.visitPreRegistration.updateMany({
+      where: {
+        id,
+        residenceId: req.user!.residenceId,
+        residentPersonId: req.user!.residentPersonId,
+        status: 'AUTORIZADA',
+      },
+      data: { status: 'CANCELADA', canceledAt: new Date() },
+    });
+    if (!result.count) return res.status(409).json({ message: 'La visita ya no se puede cancelar.' });
+    return res.json(await prisma.visitPreRegistration.findUniqueOrThrow({ where: { id }, include: visitRelations }));
+  } catch (error) { return next(error); }
+});
+
+app.get('/api/visits', requireAuth, requirePermission('ACCESS_VIEW'), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    await markExpiredVisits(prisma, req.user!.residenceId);
+    const visits = await prisma.visitPreRegistration.findMany({
+      where: { residenceId: req.user!.residenceId },
+      orderBy: [{ validFrom: 'asc' }, { createdAt: 'desc' }],
+      take: 300,
+      include: visitRelations,
+    });
+    return res.json(visits);
+  } catch (error) { return next(error); }
+});
+
+app.post('/api/visits/porter', requireAuth, requirePermission('ACCESS_REGISTER'), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const parsed = porterVisitCreateSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ message: parsed.error.issues[0]?.message ?? 'Datos de visita inválidos.' });
+    if (new Date(parsed.data.validFrom).getTime() < Date.now() - 60_000 || new Date(parsed.data.validUntil) <= new Date()) {
+      return res.status(400).json({ message: 'La vigencia de la visita debe iniciar ahora o en el futuro y terminar más adelante.' });
+    }
+    const resident = await prisma.person.findFirst({
+      where: { id: parsed.data.residentPersonId, residenceId: req.user!.residenceId, type: PersonType.RESIDENTE, active: true },
+      select: { id: true },
+    });
+    if (!resident) return res.status(404).json({ message: 'Residente no encontrado o inactivo.' });
+    const visit = await prisma.visitPreRegistration.create({
+      data: {
+        visitorName: parsed.data.visitorName,
+        visitorDocumentNumber: parsed.data.visitorDocumentNumber || null,
+        observations: parsed.data.observations || null,
+        vehiclePlate: parsed.data.vehiclePlate?.replace(/[\s-]/g, '').toUpperCase() || null,
+        vehicleType: parsed.data.vehicleType,
+        validFrom: new Date(parsed.data.validFrom),
+        validUntil: new Date(parsed.data.validUntil),
+        origin: 'PORTERIA',
+        residentApprovalConfirmed: true,
+        residentPersonId: resident.id,
+        createdById: req.user!.id,
+        residenceId: req.user!.residenceId,
+      },
+      include: visitRelations,
+    });
+    return res.status(201).json(visit);
+  } catch (error) { return next(error); }
+});
+
+app.post('/api/visits/:id/check-in', requireAuth, requirePermission('ACCESS_REGISTER'), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ message: 'Identificador de visita inválido.' });
+    await markExpiredVisits(prisma, req.user!.residenceId);
+    const now = new Date();
+    const result = await prisma.$transaction(async (transaction) => {
+      const visit = await transaction.visitPreRegistration.findFirst({
+        where: { id, residenceId: req.user!.residenceId, status: 'AUTORIZADA', validFrom: { lte: now }, validUntil: { gt: now } },
+        include: { resident: true },
+      });
+      if (!visit) return { status: 'unavailable' as const };
+      if (visit.vehiclePlate) {
+        const plate = visit.vehiclePlate.replace(/[\s-]/g, '').toUpperCase();
+        const existingVehicle = await transaction.vehicle.findUnique({
+          where: { residenceId_plate: { residenceId: req.user!.residenceId, plate } },
+          select: { id: true },
+        });
+        if (existingVehicle) return { status: 'plate-conflict' as const };
+      }
+      const visitor = await transaction.person.create({
+        data: {
+          type: PersonType.VISITANTE,
+          fullName: visit.visitorName,
+          documentNumber: visit.visitorDocumentNumber,
+          buildingSectionType: visit.resident.buildingSectionType,
+          buildingSectionNumber: visit.resident.buildingSectionNumber,
+          apartmentNumber: visit.resident.apartmentNumber,
+          residenceId: req.user!.residenceId,
+        },
+      });
+      let vehicleId: number | undefined;
+      if (visit.vehiclePlate && visit.vehicleType) {
+        const plate = visit.vehiclePlate.replace(/[\s-]/g, '').toUpperCase();
+        const vehicle = await transaction.vehicle.create({
+          data: { plate, type: visit.vehicleType, personId: visitor.id, residenceId: req.user!.residenceId },
+          select: { id: true },
+        });
+        vehicleId = vehicle.id;
+      }
+      const claimed = await transaction.visitPreRegistration.updateMany({
+        where: { id, residenceId: req.user!.residenceId, status: 'AUTORIZADA', validFrom: { lte: now }, validUntil: { gt: now } },
+        data: { status: 'EN_CURSO', checkedInAt: now, visitorPersonId: visitor.id },
+      });
+      if (!claimed.count) throw new Error('VISIT_NO_LONGER_AVAILABLE');
+      await transaction.accessLog.create({
+        data: {
+          accessType: 'ENTRADA',
+          occurredAt: now,
+          personId: visitor.id,
+          vehicleId,
+          registeredById: req.user!.id,
+          residenceId: req.user!.residenceId,
+          visitPreRegistrationId: id,
+        },
+      });
+      return {
+        status: 'ok' as const,
+        visit: await transaction.visitPreRegistration.findUniqueOrThrow({ where: { id }, include: visitRelations }),
+      };
+    });
+    if (result.status === 'unavailable') return res.status(409).json({ message: 'La visita no existe, aún no está vigente o ya fue utilizada.' });
+    if (result.status === 'plate-conflict') return res.status(409).json({ message: 'La placa ya está asociada a otra persona. Verifica los datos en portería.' });
+    return res.json(result.visit);
+  } catch (error) {
+    if (error instanceof Error && error.message === 'VISIT_NO_LONGER_AVAILABLE') {
+      return res.status(409).json({ message: 'La visita no existe, aún no está vigente o ya fue utilizada.' });
+    }
+    if (error instanceof Error && 'code' in error && error.code === 'P2002') return res.status(409).json({ message: 'La placa ya está registrada para otra persona.' });
+    return next(error);
+  }
+});
+
+app.post('/api/visits/:id/check-out', requireAuth, requirePermission('ACCESS_REGISTER'), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ message: 'Identificador de visita inválido.' });
+    const result = await prisma.$transaction(async (transaction) => {
+      const visit = await transaction.visitPreRegistration.findFirst({
+        where: { id, residenceId: req.user!.residenceId, status: 'EN_CURSO', visitorPersonId: { not: null } },
+        select: { visitorPersonId: true },
+      });
+      if (!visit?.visitorPersonId) return null;
+      const now = new Date();
+      const completed = await transaction.visitPreRegistration.updateMany({
+        where: { id, residenceId: req.user!.residenceId, status: 'EN_CURSO' },
+        data: { status: 'COMPLETADA', checkedOutAt: now },
+      });
+      if (!completed.count) return null;
+      const entry = await transaction.accessLog.findFirst({
+        where: { visitPreRegistrationId: id, accessType: 'ENTRADA' },
+        select: { vehicleId: true },
+      });
+      await transaction.accessLog.create({
+        data: {
+          accessType: 'SALIDA',
+          occurredAt: now,
+          personId: visit.visitorPersonId,
+          vehicleId: entry?.vehicleId,
+          registeredById: req.user!.id,
+          residenceId: req.user!.residenceId,
+          visitPreRegistrationId: id,
+        },
+      });
+      return transaction.visitPreRegistration.findUniqueOrThrow({ where: { id }, include: visitRelations });
+    });
+    if (!result) return res.status(409).json({ message: 'La visita no está en curso o ya registró su salida.' });
+    return res.json(result);
+  } catch (error) { return next(error); }
 });
 
 const userResponse = {

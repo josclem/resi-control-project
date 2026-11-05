@@ -27,6 +27,16 @@ La API queda en `http://localhost:4000` y el frontend en `http://localhost:5173`
 
 La administración puede invitar por correo a una persona residente que ya esté registrada. La ficha del residente guarda su correo de contacto y el formulario de invitación lo prellena; al invitar o reenviar, la dirección utilizada se actualiza en la ficha. El enlace es de un solo uso y vence en 48 horas; el residente define su propia contraseña y queda asociado a ese registro de persona y residencia. La invitación no concede permisos administrativos. Las cuentas activadas pueden iniciar sesión en el portal de residentes.
 
+## Prerregistros y control de visitas
+
+El residente autoriza sus visitas desde el portal. Puede indicar visitante, documento, observaciones y vehículo opcionales, y ajustar el inicio y fin con controles de fecha y hora; por defecto, la vigencia inicia ahora y termina a la medianoche del día actual (00:00 del día siguiente). Ambos horarios son editables. El residente puede cancelar una visita autorizada que todavía no haya ingresado.
+
+Si una visita llega sin prerregistro, portería puede registrarla después de contactar al residente por el proceso habitual y confirmar su autorización. El sistema guarda el origen `PORTERIA`, el usuario que hizo el registro y la confirmación de autorización externa; no realiza ni verifica la llamada.
+
+Al llegar, portería puede buscar el prerregistro por nombre, documento o placa, y registra la entrada desde la lista de visitas vigentes; se crea el registro del visitante y su movimiento de entrada enlazado al prerregistro. La salida se registra desde la misma visita y queda enlazada al mismo historial. Una visita autorizada que vence sin registrar entrada pasa a `NOSHOW`; la API actualiza estos estados al iniciar y cada minuto, y al consultar las visitas.
+
+Las fechas y horas se interpretan en la zona horaria local del navegador. La zona horaria oficial de cada residencia sigue pendiente de definirse antes de desplegar para varias regiones.
+
 Para Gmail:
 
 1. Activa la verificación en dos pasos en la cuenta que enviará los mensajes.

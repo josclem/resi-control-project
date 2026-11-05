@@ -6,6 +6,8 @@ import {
   formatPhone,
   normalizeDocumentNumber,
   personSchema,
+  porterVisitCreateSchema,
+  residentVisitCreateSchema,
 } from '../../src/validation.js';
 
 describe('validación de reglas de dominio', () => {
@@ -51,6 +53,23 @@ describe('validación de reglas de dominio', () => {
     expect(personSchema.parse(person).email).toBeUndefined();
   });
 
+  it('valida la vigencia, vehículo y confirmación de autorización de visitas', () => {
+    const visit = {
+      visitorName: 'Visita de prueba',
+      validFrom: '2026-11-04T10:00:00-05:00',
+      validUntil: '2026-11-05T10:00:00-05:00',
+    };
+    expect(residentVisitCreateSchema.safeParse(visit).success).toBe(true);
+    expect(residentVisitCreateSchema.parse({ ...visit, observations: '  Llegará con equipaje  ' }).observations).toBe('Llegará con equipaje');
+    expect(residentVisitCreateSchema.safeParse({ ...visit, observations: 'a'.repeat(501) }).success).toBe(false);
+    expect(residentVisitCreateSchema.safeParse({ ...visit, validUntil: visit.validFrom }).success).toBe(false);
+    expect(residentVisitCreateSchema.safeParse({ ...visit, vehiclePlate: 'ABC123' }).success).toBe(false);
+    expect(porterVisitCreateSchema.safeParse({
+      ...visit,
+      residentPersonId: 1,
+      residentApprovalConfirmed: false,
+    }).success).toBe(false);
+  });
 
   it('normaliza teléfonos colombianos y rechaza longitudes inválidas', () => {
     expect(formatPhone('+57 300-123-4567')).toBe('(+57) 300 123 4567');
