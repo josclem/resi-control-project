@@ -1,5 +1,6 @@
 import nodemailer from 'nodemailer';
 import { getMailConfiguration, MailConfiguration } from './resident-invitation-email.js';
+import { getResendConfiguration, sendWithResend } from './resend-email.js';
 
 export type ResidentCommunicationMailer = {
   isConfigured(): boolean;
@@ -45,20 +46,21 @@ export function createResidentCommunicationMailer(environment: NodeJS.ProcessEnv
   }
 
   return {
-    isConfigured: () => Boolean(getMailConfiguration(environment)),
+    isConfigured: () => Boolean(getResendConfiguration(environment) || getMailConfiguration(environment)),
     async sendMessage({ email, residenceName, subject, body, unsubscribeUrl }) {
-      const settings = configuration();
       const paragraphs = escapeHtml(body).replace(/\r?\n/g, '<br>');
       const unsubscribe = unsubscribeUrl
         ? `<p>Si no deseas recibir mensajes promocionales, <a href="${escapeHtml(unsubscribeUrl)}">puedes darte de baja aquí</a>.</p>`
         : '';
-      await getTransporter().sendMail({
-        from: settings.from,
-        to: email,
-        subject,
-        text: `Mensaje para residentes de ${residenceName}:\n\n${body}${unsubscribeUrl ? `\n\nPara dejar de recibir mensajes promocionales: ${unsubscribeUrl}` : ''}`,
-        html: `<p>Mensaje para residentes de <strong>${escapeHtml(residenceName)}</strong>:</p><p>${paragraphs}</p>${unsubscribe}`,
-      });
+      const text = `Mensaje para residentes de ${residenceName}:\n\n${body}${unsubscribeUrl ? `\n\nPara dejar de recibir mensajes promocionales: ${unsubscribeUrl}` : ''}`;
+      const html = `<p>Mensaje para residentes de <strong>${escapeHtml(residenceName)}</strong>:</p><p>${paragraphs}</p>${unsubscribe}`;
+      const resend = getResendConfiguration(environment);
+      if (resend) {
+        await sendWithResend(resend, { to: email, subject, text, html });
+      } else {
+        const settings = configuration();
+        await getTransporter().sendMail({ from: settings.from, to: email, subject, text, html });
+      }
     },
   };
 }

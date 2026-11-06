@@ -1,4 +1,5 @@
 import nodemailer from 'nodemailer';
+import { getResendConfiguration, sendWithResend } from './resend-email.js';
 
 export type MailConfiguration = {
   host: string;
@@ -46,8 +47,18 @@ function escapeHtml(value: string) {
 
 export function createResidentInvitationMailer(environment: NodeJS.ProcessEnv = process.env): ResidentInvitationMailer {
   return {
-    isConfigured: () => Boolean(getMailConfiguration(environment)),
+    isConfigured: () => Boolean(getResendConfiguration(environment) || getMailConfiguration(environment)),
     async sendInvitation({ email, residentName, residenceName, url }) {
+      const content = {
+        subject: `Activa tu cuenta de residente en ${residenceName}`,
+        text: `Hola ${residentName},\n\nTe invitaron a activar tu cuenta de residente en ${residenceName}. Abre este enlace antes de que venza:\n${url}\n\nSi no esperabas esta invitación, puedes ignorar este mensaje.`,
+        html: `<p>Hola ${escapeHtml(residentName)},</p><p>Te invitaron a activar tu cuenta de residente en <strong>${escapeHtml(residenceName)}</strong>.</p><p><a href="${escapeHtml(url)}">Activar mi cuenta</a></p><p>Este enlace vence en 48 horas y solo se puede usar una vez. Si no esperabas esta invitación, puedes ignorar este mensaje.</p>`,
+      };
+      const resend = getResendConfiguration(environment);
+      if (resend) {
+        await sendWithResend(resend, { to: email, ...content });
+        return;
+      }
       const configuration = getMailConfiguration(environment);
       if (!configuration) throw new Error('Configura el servicio SMTP antes de enviar invitaciones.');
       const transporter = nodemailer.createTransport({
@@ -59,9 +70,7 @@ export function createResidentInvitationMailer(environment: NodeJS.ProcessEnv = 
       await transporter.sendMail({
         from: configuration.from,
         to: email,
-        subject: `Activa tu cuenta de residente en ${residenceName}`,
-        text: `Hola ${residentName},\n\nTe invitaron a activar tu cuenta de residente en ${residenceName}. Abre este enlace antes de que venza:\n${url}\n\nSi no esperabas esta invitación, puedes ignorar este mensaje.`,
-        html: `<p>Hola ${escapeHtml(residentName)},</p><p>Te invitaron a activar tu cuenta de residente en <strong>${escapeHtml(residenceName)}</strong>.</p><p><a href="${escapeHtml(url)}">Activar mi cuenta</a></p><p>Este enlace vence en 48 horas y solo se puede usar una vez. Si no esperabas esta invitación, puedes ignorar este mensaje.</p>`,
+        ...content,
       });
     },
   };
