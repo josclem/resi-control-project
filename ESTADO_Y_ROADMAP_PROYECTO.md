@@ -91,6 +91,7 @@ Las fases representan dependencias y orden de producto, no fechas comprometidas.
 - Completar avisos transaccionales al residente por encomienda y visita mediante un canal validado con conjuntos piloto. Reutilizar WhatsApp solo con consentimiento y requisitos de Meta cubiertos; considerar correo u otro canal.
 - Completar el flujo de encomiendas con evidencia de entrega configurable, permisos de acceso a la evidencia y registro de eventos de notificación.
 - Añadir un canal de comunicados con audiencia, publicación, vigencia y confirmación de lectura si los pilotos la requieren.
+- Administrar desde la interfaz las razones de autorización promocional: crear, editar, activar y desactivar opciones del catálogo sin modificar la base manualmente.
 - Implementar PQRS con categorías, responsable, estados, vencimientos, comentarios visibles/internos y trazabilidad.
 - Verificar que el portal funcione bien en móvil antes de decidir si se requiere una aplicación nativa.
 

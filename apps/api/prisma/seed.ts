@@ -1,5 +1,6 @@
 import { PrismaClient, UserRole } from '@prisma/client';
 import bcrypt from 'bcryptjs';
+import { defaultAuthorizationReasons } from '../src/authorization-reasons.js';
 
 const prisma = new PrismaClient();
 
@@ -30,6 +31,14 @@ async function main() {
       where: { code: documentType.code },
       update: { name: documentType.name, active: true },
       create: documentType,
+    });
+  }
+
+  for (const reason of defaultAuthorizationReasons) {
+    await prisma.authorizationReason.upsert({
+      where: { code: reason.code },
+      update: { description: reason.description, active: true },
+      create: reason,
     });
   }
 

@@ -27,7 +27,11 @@ export const residentCommunicationResidentFilterSchema = z.object({
 });
 export const residentEmailConsentSchema = z.object({
   consented: z.boolean(),
-  source: z.string().trim().min(3).max(250),
+  reasonCode: z.string().trim().min(1).max(60).optional(),
+}).superRefine((value, context) => {
+  if (value.consented && !value.reasonCode) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['reasonCode'], message: 'Selecciona una razón de autorización.' });
+  }
 });
 export const residentCommunicationCreateSchema = z.object({
   type: z.enum(['ADMINISTRATIVE', 'PROMOTIONAL']),

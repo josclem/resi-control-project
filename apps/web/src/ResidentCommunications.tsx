@@ -36,6 +36,7 @@ type Communication = {
 
 type CommunicationStatusFilter = 'ALL' | 'ACTIVE' | 'INACTIVE';
 type MessageType = 'ADMINISTRATIVE' | 'PROMOTIONAL';
+type AuthorizationReason = { code: string; description: string };
 
 function headers(json = false) {
   const result = new Headers({ Authorization: `Bearer ${localStorage.getItem('token') ?? ''}` });
@@ -90,6 +91,7 @@ export function ResidentCommunications() {
   const [selectAll, setSelectAll] = useState(false);
   const [consentTarget, setConsentTarget] = useState<{ resident: Resident; consented: boolean } | null>(null);
   const [consentSource, setConsentSource] = useState('');
+  const [authorizationReasons, setAuthorizationReasons] = useState<AuthorizationReason[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [sendConfirmationOpen, setSendConfirmationOpen] = useState(false);
@@ -113,13 +115,20 @@ export function ResidentCommunications() {
   useEffect(() => {
     let active = true;
     setLoading(true);
-    Promise.all([loadResidents(), loadHistory()])
+    Promise.all([loadResidents(), loadHistory(), loadAuthorizationReasons()])
       .catch((reason: unknown) => {
         if (active) setError(reason instanceof Error ? reason.message : 'No se pudieron cargar los comunicados.');
       })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [audienceStatus]);
+
+  async function loadAuthorizationReasons() {
+    const response = await request('/api/admin/communications/authorization-reasons');
+    const data = await response.json();
+    if (!response.ok) throw new Error(data?.message ?? 'No se pudieron cargar las razones de autorización.');
+    setAuthorizationReasons(data);
+  }
 
   const visibleResidents = useMemo(() => {
     const query = normalizeSearch(search.trim());
@@ -171,7 +180,7 @@ export function ResidentCommunications() {
       const response = await request(`/api/admin/communications/residents/${consentTarget.resident.id}/promotional-consent`, {
         method: 'PUT',
         headers: headers(true),
-        body: JSON.stringify({ consented: consentTarget.consented, source: consentSource }),
+        body: JSON.stringify({ consented: consentTarget.consented, reasonCode: consentSource || undefined }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data?.message ?? 'No se pudo guardar la autorización.');
@@ -337,7 +346,9 @@ export function ResidentCommunications() {
         <div className="panel-heading"><div><span className="eyebrow">AUTORIZACIÓN PROMOCIONAL</span><h2>{consentTarget.consented ? 'Registrar autorización' : 'Retirar autorización'}</h2></div><button type="button" className="secondary" onClick={() => setConsentTarget(null)}>Cerrar</button></div>
         <p>{consentTarget.resident.fullName} · {consentTarget.resident.email}</p>
         <form className="form-grid" onSubmit={updateConsent}>
-          <label className="form-full">Fuente o evidencia (acta, formulario firmado, solicitud del residente, etc.)<input required minLength={3} maxLength={250} value={consentSource} onChange={(event) => setConsentSource(event.target.value)} /></label>
+          {consentTarget.consented
+            ? <label className="form-full">Fuente o evidencia<select required value={consentSource} onChange={(event) => setConsentSource(event.target.value)}><option value="">Selecciona una razón</option>{authorizationReasons.map((reason) => <option key={reason.code} value={reason.code}>{reason.description}</option>)}</select></label>
+            : <p className="form-full">La autorización se retirará y quedará registrada en el historial.</p>}
           <button type="submit" disabled={saving}>{saving ? 'Guardando…' : 'Confirmar'}</button>
         </form>
       </section>
