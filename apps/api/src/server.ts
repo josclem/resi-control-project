@@ -51,6 +51,7 @@ import {
 import { createResidentInvitationMailer, ResidentInvitationMailer } from './resident-invitation-email.js';
 import { createResidentCommunicationMailer, ResidentCommunicationMailer } from './resident-communication-email.js';
 import { createPasswordResetMailer, PasswordResetMailer } from './password-reset-email.js';
+import { defaultAuthorizationReasons } from './authorization-reasons.js';
 
 type AuthenticatedRequest = Request & { user?: { id: number; role: UserRole; residenceId: number; residentPersonId: number | null; permissions: Permission[]; roleName: string } };
 
@@ -983,6 +984,25 @@ app.get('/api/admin/communications/residents', requireAuth, allowRoles(UserRole.
       buildingSectionNumber: req.query.buildingSectionNumber === undefined ? undefined : String(req.query.buildingSectionNumber),
       apartmentNumber: req.query.apartmentNumber === undefined ? undefined : String(req.query.apartmentNumber),
     });
+
+    app.get('/api/admin/communications/authorization-reasons', requireAuth, allowRoles(UserRole.SUPER_ADMINISTRADOR, UserRole.ADMINISTRADOR), async (_req: AuthenticatedRequest, res, next) => {
+      try {
+        for (const reason of defaultAuthorizationReasons) {
+          await prisma.authorizationReason.upsert({
+            where: { code: reason.code },
+            update: { description: reason.description },
+            create: reason,
+          });
+        }
+        return res.json(await prisma.authorizationReason.findMany({
+          where: { active: true },
+          orderBy: { description: 'asc' },
+          select: { code: true, description: true },
+        }));
+      } catch (error) {
+        return next(error);
+      }
+    });
     const residents = await prisma.person.findMany({
       where: residentAudienceWhere(req.user!.residenceId, filters),
       select: {
@@ -1018,7 +1038,19 @@ app.put('/api/admin/communications/residents/:id/promotional-consent', requireAu
     });
     if (!person) return res.status(404).json({ message: 'Residente no encontrado.' });
     if (input.consented && !person.email) return res.status(409).json({ message: 'Registra un correo electrónico antes de autorizar promociones.' });
+    for (const defaultReason of defaultAuthorizationReasons) {
+      await prisma.authorizationReason.upsert({
+        where: { code: defaultReason.code },
+        update: { description: defaultReason.description },
+        create: defaultReason,
+      });
+    }
+    const reason = input.reasonCode
+      ? await prisma.authorizationReason.findFirst({ where: { code: input.reasonCode, active: true } })
+      : null;
+    if (input.consented && !reason) return res.status(400).json({ message: 'Selecciona una razón de autorización válida.' });
     const email = (person.email ?? person.promotionalEmailConsentEmail ?? '').trim().toLowerCase();
+    const source = reason?.description ?? 'Retiro de autorización solicitado por el residente';
     const recordedAt = new Date();
     await prisma.$transaction([
       prisma.person.update({
@@ -1026,7 +1058,7 @@ app.put('/api/admin/communications/residents/:id/promotional-consent', requireAu
         data: input.consented
           ? {
             promotionalEmailConsentAt: recordedAt,
-            promotionalEmailConsentSource: input.source,
+            promotionalEmailConsentSource: source,
             promotionalEmailConsentEmail: email,
             promotionalEmailUnsubscribedAt: null,
           }
@@ -1042,7 +1074,8 @@ app.put('/api/admin/communications/residents/:id/promotional-consent', requireAu
           personId: person.id,
           email,
           action: input.consented ? ResidentEmailConsentAction.GRANTED : ResidentEmailConsentAction.WITHDRAWN,
-          source: input.source,
+          source,
+          authorizationReasonId: reason?.id,
           recordedById: req.user!.id,
           createdAt: recordedAt,
         },

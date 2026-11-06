@@ -347,13 +347,24 @@ model ResidentEmailConsentEvent {
   action       ResidentEmailConsentAction
   email        String
   source       String
+  authorizationReasonId Int?
   createdAt    DateTime                   @default(now())
   personId     Int
   recordedById Int?
   person       Person                     @relation(fields: [personId], references: [id])
   recordedBy   User?                      @relation("ResidentEmailConsentRecorder", fields: [recordedById], references: [id], onDelete: SetNull)
+  authorizationReason AuthorizationReason? @relation(fields: [authorizationReasonId], references: [id], onDelete: SetNull)
 
   @@index([personId, createdAt])
+}
+
+model AuthorizationReason {
+  id                    Int                         @id @default(autoincrement())
+  code                  String                      @unique
+  description           String
+  active                Boolean                     @default(true)
+  createdAt             DateTime                    @default(now())
+  consentEvents         ResidentEmailConsentEvent[]
 }
 
 model ResidentInvitation {

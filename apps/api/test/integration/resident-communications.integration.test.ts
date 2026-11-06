@@ -158,7 +158,7 @@ describe('comunicados por correo a residentes', () => {
     const consent = await request(app)
       .put(`/api/admin/communications/residents/${inactiveResidentId}/promotional-consent`)
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ consented: true, source: 'Autorización firmada en portería' });
+      .send({ consented: true, reasonCode: 'SIGNED_FORM' });
     expect(consent.status).toBe(200);
 
     const response = await request(app)
