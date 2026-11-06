@@ -3,6 +3,13 @@ import { z } from 'zod';
 import { permissions } from './permissions.js';
 
 export const loginSchema = z.object({ email: z.string().email(), password: z.string().min(1) });
+export const passwordResetRequestSchema = z.object({
+  email: z.string().trim().email().max(254).transform((value) => value.toLowerCase()),
+});
+export const passwordResetSchema = z.object({
+  token: z.string().regex(/^[a-f0-9]{64}$/),
+  password: z.string().min(12).max(128),
+});
 export const residentInvitationSchema = z.object({
   personId: z.number().int().positive(),
   email: z.string().trim().email().max(254).transform((value) => value.toLowerCase()),

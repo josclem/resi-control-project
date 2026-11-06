@@ -27,6 +27,8 @@ import {
   deliveryStatusSchema,
   irregularAccessModeSchema,
   loginSchema,
+  passwordResetRequestSchema,
+  passwordResetSchema,
   personSchema,
   porterVisitCreateSchema,
   residentInvitationAcceptanceSchema,
@@ -48,6 +50,7 @@ import {
 } from './validation.js';
 import { createResidentInvitationMailer, ResidentInvitationMailer } from './resident-invitation-email.js';
 import { createResidentCommunicationMailer, ResidentCommunicationMailer } from './resident-communication-email.js';
+import { createPasswordResetMailer, PasswordResetMailer } from './password-reset-email.js';
 
 type AuthenticatedRequest = Request & { user?: { id: number; role: UserRole; residenceId: number; residentPersonId: number | null; permissions: Permission[]; roleName: string } };
 
@@ -120,6 +123,7 @@ export function createApp(
   jwtSecret: string,
   residentInvitationMailer: ResidentInvitationMailer = createResidentInvitationMailer(),
   residentCommunicationMailer: ResidentCommunicationMailer = createResidentCommunicationMailer(),
+  passwordResetMailer: PasswordResetMailer = createPasswordResetMailer(),
 ) {
   if (!jwtSecret) throw new Error('JWT_SECRET es obligatorio');
 
@@ -394,6 +398,64 @@ app.post('/api/auth/login', async (req, res, next) => {
       },
     });
   } catch (error) {
+    return next(error);
+  }
+});
+
+app.post('/api/auth/password-reset/request', async (req, res, next) => {
+  try {
+    const parsed = passwordResetRequestSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ message: 'Indica un correo válido.' });
+    if (!passwordResetMailer.isConfigured()) {
+      return res.status(503).json({ message: 'La recuperación de contraseña no está disponible en este momento.' });
+    }
+    const user = await prisma.user.findUnique({
+      where: { email: parsed.data.email },
+      select: { id: true, name: true, email: true, active: true },
+    });
+    if (user?.active) {
+      const token = randomBytes(32).toString('hex');
+      const tokenHash = createHash('sha256').update(token).digest('hex');
+      const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
+      await prisma.$transaction([
+        prisma.passwordResetToken.deleteMany({ where: { userId: user.id, usedAt: null } }),
+        prisma.passwordResetToken.create({ data: { tokenHash, expiresAt, userId: user.id } }),
+      ]);
+      const webUrl = new URL(process.env.WEB_APP_URL!);
+      webUrl.hash = `reset-password=${token}`;
+      await passwordResetMailer.sendPasswordReset({ email: user.email, userName: user.name, url: webUrl.toString() });
+    }
+    return res.status(202).json({ message: 'Si el correo está registrado, recibirás instrucciones para restablecer la contraseña.' });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.post('/api/auth/password-reset/complete', async (req, res, next) => {
+  try {
+    const parsed = passwordResetSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ message: 'El enlace o la contraseña no son válidos.' });
+    const tokenHash = createHash('sha256').update(parsed.data.token).digest('hex');
+    const resetToken = await prisma.passwordResetToken.findUnique({ where: { tokenHash } });
+    if (!resetToken || resetToken.usedAt || resetToken.expiresAt <= new Date()) {
+      return res.status(410).json({ message: 'El enlace venció o ya fue utilizado. Solicita uno nuevo.' });
+    }
+    const passwordHash = await bcrypt.hash(parsed.data.password, 12);
+    const now = new Date();
+    await prisma.$transaction(async (transaction) => {
+      const consumed = await transaction.passwordResetToken.updateMany({
+        where: { id: resetToken.id, usedAt: null, expiresAt: { gt: now } },
+        data: { usedAt: now },
+      });
+      if (consumed.count !== 1) throw new Error('PASSWORD_RESET_ALREADY_USED');
+      await transaction.user.update({ where: { id: resetToken.userId }, data: { passwordHash } });
+      await transaction.passwordResetToken.deleteMany({ where: { userId: resetToken.userId, id: { not: resetToken.id } } });
+    });
+    return res.json({ message: 'Contraseña actualizada. Ya puedes iniciar sesión.' });
+  } catch (error) {
+    if (error instanceof Error && error.message === 'PASSWORD_RESET_ALREADY_USED') {
+      return res.status(410).json({ message: 'El enlace ya fue utilizado. Solicita uno nuevo.' });
+    }
     return next(error);
   }
 });
