@@ -51,9 +51,10 @@ Para Gmail:
    SMTP_USER="accivia.co@gmail.com"
    SMTP_APP_PASSWORD="contraseña-de-aplicación"
    EMAIL_FROM="Accivia <accivia.co@gmail.com>"
+   RESEND_API_KEY=""
    ```
 
-   `SMTP_USER` y el correo de `EMAIL_FROM` deben pertenecer a la cuenta Gmail autorizada. En este proyecto la cuenta remitente es `accivia.co@gmail.com`. Mantén `.env` fuera de Git y no compartas ni registres la contraseña de aplicación.
+   `SMTP_USER` y el correo de `EMAIL_FROM` deben pertenecer a la cuenta Gmail autorizada. En este proyecto la cuenta remitente es `accivia.co@gmail.com`. Para Render, puedes usar Resend con `RESEND_API_KEY` y `EMAIL_FROM="Accivia <onboarding@resend.dev>"`; Resend se usa automáticamente y evita conexiones SMTP bloqueadas. Mantén `.env` fuera de Git y no compartas ni registres ninguna clave.
 4. Reinicia la API después de cambiar `.env`.
 
 `http://localhost:5173` solo sirve para probar el enlace en el mismo equipo donde corre la aplicación. Antes de invitar residentes reales, publica el frontend y la API bajo HTTPS; configura `WEB_APP_URL` y `WEB_ORIGIN` en `apps/api/.env`, y `VITE_API_URL` en `apps/web/.env` antes de compilar el frontend. Luego se puede cambiar Gmail por un proveedor SMTP del dominio propio sin cambiar el flujo de invitación.
