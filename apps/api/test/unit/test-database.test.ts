@@ -7,7 +7,7 @@ describe('protección de base de datos de integración', () => {
   });
 
   it('rechaza bases que no tengan el nombre reservado para pruebas', () => {
-    expect(() => getTestDatabaseUrl('postgresql://localhost/accivia')).toThrow('resi_control_test');
+    expect(() => getTestDatabaseUrl('postgresql://localhost/accivia')).toThrow('accivia_test');
     expect(() => getTestDatabaseUrl('file:./dev.db')).toThrow('URL válida de PostgreSQL');
   });
 
@@ -15,7 +15,7 @@ describe('protección de base de datos de integración', () => {
     const previous = process.env.NODE_ENV;
     process.env.NODE_ENV = 'production';
     try {
-      expect(() => getTestDatabaseUrl('postgresql://localhost/resi_control_test')).toThrow('no se pueden ejecutar en producción');
+      expect(() => getTestDatabaseUrl('postgresql://localhost/accivia_test')).toThrow('no se pueden ejecutar en producción');
     } finally {
       if (previous === undefined) delete process.env.NODE_ENV;
       else process.env.NODE_ENV = previous;

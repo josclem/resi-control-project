@@ -46,7 +46,7 @@ En Windows, si `prisma generate` falla con `EPERM`, detener solo el proceso de l
 Completado y funcionando:
 
 - Monorepo TypeScript con API Express, Prisma y frontend React/Vite.
-- PostgreSQL local `resi_control` sincronizado; las pruebas manuales recientes se hicieron en la base aislada `resi_control_test`.
+- PostgreSQL local `resi_control` sincronizado; las pruebas manuales recientes se hicieron en la base aislada `accivia_test`.
 - Login JWT con roles `SUPER_ADMINISTRADOR`, `ADMINISTRADOR`, `VIGILANTE` y roles personalizados con permisos por residencia.
 - Administración de usuarios y roles desde la interfaz, además de aislamiento por residencia.
 - Invitaciones de residentes por correo: enlace de un solo uso con vencimiento, creación de contraseña propia y asociación de la cuenta al residente registrado. El envío requiere configurar SMTP; Gmail usa contraseña de aplicación.

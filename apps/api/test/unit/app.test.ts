@@ -4,7 +4,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { createApp } from '../../src/server.js';
 
 const prisma = new PrismaClient({
-  datasources: { db: { url: 'postgresql://localhost:5432/resi_control_test' } },
+  datasources: { db: { url: 'postgresql://localhost:5432/accivia_test' } },
 });
 const app = createApp(prisma, 'unit-tests-only-secret');
 

@@ -65,7 +65,7 @@ El bloqueo observado con Avast Free afecta la conexión SMTP de la API ejecutada
 Desde la raíz del proyecto:
 
 - `npm test` ejecuta pruebas unitarias sin conectarse a PostgreSQL.
-- `npm run test:integration` ejecuta pruebas de rutas y persistencia; requiere una base PostgreSQL exclusiva llamada `resi_control_test`.
+- `npm run test:integration` ejecuta pruebas de rutas y persistencia; requiere una base PostgreSQL exclusiva llamada `accivia_test`.
 - `npm run build` valida tipos y compila API y frontend.
 
 En cada pull request hacia `main` y en cada push a `main`, GitHub Actions ejecuta las tres validaciones usando PostgreSQL 16 aislado para las pruebas de integración.
@@ -80,7 +80,7 @@ Remove-Item Env:DATABASE_URL
 npm run test:integration
 ```
 
-La suite de integración no usa el `.env` de desarrollo: requiere `DATABASE_URL_TEST` y rechaza cualquier base cuyo nombre no sea exactamente `resi_control_test`; también bloquea la ejecución con `NODE_ENV=production`. Sus fixtures son únicos por ejecución y se limpian al finalizar. Nunca configures la URL de desarrollo o producción en `DATABASE_URL_TEST`.
+La suite de integración no usa el `.env` de desarrollo: requiere `DATABASE_URL_TEST` y rechaza cualquier base cuyo nombre no sea exactamente `accivia_test`; también bloquea la ejecución con `NODE_ENV=production`. Sus fixtures son únicos por ejecución y se limpian al finalizar. Nunca configures la URL de desarrollo o producción en `DATABASE_URL_TEST`.
 
 La API exporta `createApp` desde `apps/api/src/server.ts`; el arranque que escucha en el puerto está separado en `apps/api/src/index.ts`, para que las pruebas HTTP no abran un puerto real.
 
