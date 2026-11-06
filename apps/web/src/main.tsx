@@ -104,7 +104,7 @@ function normalizePersonSearch(value: string) {
 }
 const api = apiBaseUrl;
 const getToken = () => localStorage.getItem('token') ?? '';
-const sessionExpiredEvent = 'resi-control:session-expired';
+const sessionExpiredEvent = 'accivia:session-expired';
 const nativeFetch = window.fetch.bind(window);
 const storedSessionKeys = ['token', 'userRole', 'userId', 'userPermissions', 'availableResidences', 'activeResidenceId'];
 
@@ -244,7 +244,7 @@ function App() {
   const [userPermissions, setUserPermissions] = useState<string[]>(JSON.parse(localStorage.getItem('userPermissions') ?? '[]'));
   const [availableResidences, setAvailableResidences] = useState<AvailableResidence[]>(JSON.parse(localStorage.getItem('availableResidences') ?? '[]'));
   const [activeResidenceId, setActiveResidenceId] = useState(localStorage.getItem('activeResidenceId') ?? '');
-  const [email, setEmail] = useState('admin@resicontrol.local');
+  const [email, setEmail] = useState('admin@accivia.local');
   const [password, setPassword] = useState('');
   const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [loginError, setLoginError] = useState('');
@@ -1264,7 +1264,7 @@ function App() {
   if (emailUnsubscribeToken) return <ResidentEmailUnsubscribe token={emailUnsubscribeToken} />;
 
   if (invitationToken) return <main className="login-page"><form className="login-card" onSubmit={activateResident}>
-    <span className="eyebrow">RESI CONTROL</span><h1>Activa tu cuenta</h1><p>Crea una contraseña para acceder como residente.</p>
+    <span className="eyebrow">Accivia</span><h1>Activa tu cuenta</h1><p>Crea una contraseña para acceder como residente.</p>
     <label>Nueva contraseña<div className="password-input-wrap"><input type={showActivationPassword ? 'text' : 'password'} autoComplete="new-password" minLength={12} maxLength={128} required value={activationPassword} onChange={(event) => setActivationPassword(event.target.value)} /><PasswordVisibilityButton visible={showActivationPassword} onToggle={() => setShowActivationPassword((visible) => !visible)} label="nueva contraseña" /></div></label>
     <label>Confirma la contraseña<div className="password-input-wrap"><input type={showActivationPasswordConfirmation ? 'text' : 'password'} autoComplete="new-password" minLength={12} maxLength={128} required value={activationPasswordConfirmation} onChange={(event) => setActivationPasswordConfirmation(event.target.value)} /><PasswordVisibilityButton visible={showActivationPasswordConfirmation} onToggle={() => setShowActivationPasswordConfirmation((visible) => !visible)} label="confirmación de contraseña" /></div></label>
     {activationError && <div className="notice">{activationError}</div>}<button disabled={activationSaving} type="submit">{activationSaving ? 'Activando...' : 'Activar cuenta'}</button>
@@ -1272,7 +1272,7 @@ function App() {
   </form></main>;
 
   if (authenticated && userRole === 'RESIDENTE') return <main className="resident-portal">
-    <header><div><span className="eyebrow">RESI CONTROL</span><h1>Portal de residente</h1><p>Prerregistra y administra tus visitas.</p>    </div><button type="button" className="secondary" onClick={logout}>Cerrar sesión</button></header>
+    <header><div><span className="eyebrow">Accivia</span><h1>Portal de residente</h1><p>Prerregistra y administra tus visitas.</p>    </div><button type="button" className="secondary" onClick={logout}>Cerrar sesión</button></header>
     {error && <div className="notice">{error}</div>}
     {notice && <div className="success">{notice}</div>}
     <section className="form-panel">
@@ -1301,14 +1301,14 @@ function App() {
   </main>;
 
   if (!authenticated) return <main className="login-page"><form className="login-card" onSubmit={login}>
-    <span className="eyebrow">RESI CONTROL</span><h1>Iniciar sesión</h1><p>Ingresa para administrar el acceso residencial.</p>
+    <span className="eyebrow">Accivia</span><h1>Iniciar sesión</h1><p>Ingresa para administrar el acceso residencial.</p>
     <label>Correo<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label>
     <label>Contraseña<div className="password-input-wrap"><input type={showLoginPassword ? 'text' : 'password'} autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} /><PasswordVisibilityButton visible={showLoginPassword} onToggle={() => setShowLoginPassword((visible) => !visible)} label="contraseña" /></div></label>
     {loginError && <div className="notice">{loginError}</div>}{loginNotice && <div className="success">{loginNotice}</div>}<button type="submit">Ingresar</button>
   </form></main>;
 
   return <main>
-    <header><div className="brand"><div className="residence-logo">{residenceLogoUrl ? <img src={residenceLogoUrl} alt={`Logo de ${residence?.name ?? 'la residencia'}`} /> : <span>RC</span>}</div><div><span className="eyebrow">RESI CONTROL</span><h1>{residence?.name ?? 'Control de acceso'}</h1><p>Supervisión del conjunto residencial en tiempo real.</p></div></div><div className="header-controls">
+    <header><div className="brand"><div className="residence-logo">{residenceLogoUrl ? <img src={residenceLogoUrl} alt={`Logo de ${residence?.name ?? 'la residencia'}`} /> : <span>AC</span>}</div><div><span className="eyebrow">Accivia</span><h1>{residence?.name ?? 'Control de acceso'}</h1><p>Supervisión del conjunto residencial en tiempo real.</p></div></div><div className="header-controls">
       {userRole === 'SUPER_ADMINISTRADOR' && <label className="residence-selector">Residencia<select aria-label="Residencia activa" value={activeResidenceId} onChange={(event) => { const selected = event.target.value; localStorage.setItem('activeResidenceId', selected); setActiveResidenceId(selected); }}><option value="">Selecciona residencia</option>{availableResidences.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>}
       <div className="actions">{(can('ACCESS_VIEW') || can('ACCESS_REGISTER')) && <button className={activeView === 'movements' ? 'active-nav' : ''} onClick={() => { setActiveView('movements'); setShowAccessForm(false); }}>Movimientos</button>}{can('ACCESS_VIEW') && <button className={activeView === 'visits' ? 'active-nav' : ''} onClick={() => setActiveView('visits')}>Visitas</button>}{can('PEOPLE_VIEW') && <button className={activeView === 'people' ? 'active-nav' : ''} onClick={() => { setActiveView('people'); setShowAccessForm(false); }}>Personas</button>}{can('VEHICLES_VIEW') && <button className={activeView === 'vehicles' ? 'active-nav' : ''} onClick={() => { setActiveView('vehicles'); setShowAccessForm(false); }}>Vehículos</button>}{can('DELIVERIES_VIEW') && <button className={activeView === 'deliveries' ? 'active-nav' : ''} onClick={() => { setActiveView('deliveries'); setShowAccessForm(false); }}>Encomiendas{totals.pendingDeliveries ? ` · ${totals.pendingDeliveries}` : ''}</button>}{can('SETTINGS_MANAGE') && <button className={activeView === 'settings' ? 'active-nav' : ''} onClick={() => { setActiveView('settings'); setShowSettings(true); }}>Configuración</button>}{can('USERS_MANAGE') && <button className={activeView === 'users' ? 'active-nav' : ''} onClick={() => setActiveView('users')}>Usuarios y roles</button>}{(userRole === 'SUPER_ADMINISTRADOR' || userRole === 'ADMINISTRADOR') && <button className={activeView === 'communications' ? 'active-nav' : ''} onClick={() => setActiveView('communications')}>Comunicados</button>}</div>
       <button type="button" className="secondary" onClick={logout}>Cerrar sesión</button>

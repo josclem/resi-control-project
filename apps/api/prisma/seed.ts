@@ -35,17 +35,17 @@ async function main() {
 
   const passwordHash = await bcrypt.hash('Admin123!', 12);
   await prisma.user.upsert({
-    where: { email: 'admin@resicontrol.local' },
+    where: { email: 'admin@accivia.local' },
     update: { passwordHash, name: 'Administrador principal', role: UserRole.SUPER_ADMINISTRADOR, active: true, residenceId: residence.id },
     create: {
       name: 'Administrador principal',
-      email: 'admin@resicontrol.local',
+      email: 'admin@accivia.local',
       passwordHash,
       role: UserRole.SUPER_ADMINISTRADOR,
       residenceId: residence.id,
     },
   });
-  console.log('Usuario inicial creado: admin@resicontrol.local / Admin123!');
+  console.log('Usuario inicial creado: admin@accivia.local / Admin123!');
 }
 
 main().finally(() => prisma.$disconnect());

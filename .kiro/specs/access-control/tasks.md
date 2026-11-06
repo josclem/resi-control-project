@@ -26,7 +26,7 @@ Estado: el MVP de gestión y registro de accesos está implementado. Continúa l
 
 ## Validación manual realizada (2026-11-04)
 
-- [x] Probar desde el navegador la interfaz y el flujo de acceso en `resi_control_test`, sin modificar la base local de desarrollo.
+- [x] Probar desde el navegador la interfaz y el flujo de acceso en `accivia_test`, sin modificar la base local de desarrollo.
 - [x] Registrar residente y visitante; confirmar entradas y salidas peatonales y vehiculares en el tablero.
 - [x] Confirmar que un movimiento peatonal repetido se bloquea y no crea otro registro.
 - [x] Cambiar el modo a autorización de supervisor, comprobar que el formulario conserva persona y tipo de movimiento, y autorizarlo; se agregó un solo movimiento.
@@ -49,7 +49,7 @@ Build y suites automatizadas, también ejecutadas el 2026-11-04:
 
 - `npm run build`: correcto; Vite conserva la advertencia de bundle mayor a 500 kB.
 - `npm test`: correcto, 5 archivos y 15 pruebas.
-- Suite completa de integración de API: correcta, 4 archivos y 19 pruebas, usando exclusivamente `resi_control_test`.
+- Suite completa de integración de API: correcta, 4 archivos y 19 pruebas, usando exclusivamente `accivia_test`.
 
 ## Próximos pasos
 

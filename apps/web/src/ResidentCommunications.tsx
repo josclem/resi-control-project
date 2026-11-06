@@ -52,7 +52,7 @@ async function request(path: string, init?: RequestInit) {
     ...init,
     headers: new Headers(init?.headers ?? headers()),
   });
-  if (response.status === 401) window.dispatchEvent(new Event('resi-control:session-expired'));
+  if (response.status === 401) window.dispatchEvent(new Event('accivia:session-expired'));
   return response;
 }
 

@@ -1,4 +1,4 @@
-# Resi Control - Convenciones técnicas
+# Accivia - Convenciones técnicas
 
 ## Stack aprobado
 

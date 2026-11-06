@@ -28,7 +28,7 @@ export function ResidentEmailUnsubscribe({ token }: { token: string }) {
   }
 
   return <main className="login-page"><section className="login-card">
-    <span className="eyebrow">RESI CONTROL</span>
+    <span className="eyebrow">Accivia</span>
     <h1>Correos promocionales</h1>
     {submitted ? <p>{message}</p> : <><p>Confirma si deseas dejar de recibir correos promocionales de esta residencia.</p>{error && <div className="notice">{error}</div>}<button type="button" disabled={saving} onClick={() => void unsubscribe()}>{saving ? 'Procesando…' : 'Darme de baja'}</button></>}
   </section></main>;

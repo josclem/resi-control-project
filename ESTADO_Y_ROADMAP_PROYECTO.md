@@ -1,11 +1,11 @@
-# Estado y roadmap de Resi Control
+# Estado y roadmap de Accivia
 
 ## Fecha de referencia
 - 2026-11-05
 
 ## Resumen ejecutivo
 
-Resi Control ya cuenta con control de acceso, personas, vehículos y encomiendas, además de un portal web para residentes. La administración de usuarios y roles, las invitaciones por correo y los prerregistros de visitas están implementados e integrados en `main` mediante los PR #10 y #12. La validación manual de los nuevos flujos de visitas y un piloto con personal de portería siguen pendientes.
+Accivia ya cuenta con control de acceso, personas, vehículos y encomiendas, además de un portal web para residentes. La administración de usuarios y roles, las invitaciones por correo y los prerregistros de visitas están implementados e integrados en `main` mediante los PR #10 y #12. La validación manual de los nuevos flujos de visitas y un piloto con personal de portería siguen pendientes.
 
 La revisión de mercado compartida por el usuario muestra una oportunidad para completar primero los flujos básicos que hoy se resuelven por otros canales y, después, diferenciar el producto con automatización e IA. Esa revisión se usa como insumo de producto, no como validación independiente de cada afirmación sobre competidores. Antes de iniciar cada módulo se deben validar necesidad, reglas de negocio, viabilidad, costos y obligaciones legales con conjuntos piloto.
 
@@ -72,7 +72,7 @@ Las fases representan dependencias y orden de producto, no fechas comprometidas.
 - Documentar roles, visibilidad de datos, reglas de estados y tratamiento de errores.
 - Alcance aprobado para usuarios y roles: SuperAdministrador global con acceso a todo el sistema; administradores gestionan usuarios y roles de su residencia, sin conceder permisos superiores a los propios; los roles configurables asignan permisos granulares desde un catálogo permitido; las cuentas se desactivan y se conserva su historial, sin borrado permanente.
 
-**Validación funcional (2026-11-03):** se recorrieron los flujos desde el navegador usando exclusivamente `resi_control_test`: una entrada normal; bloqueo de entrada duplicada; rechazo de excepción sin supervisor y aceptación con credenciales válidas; recepción de encomienda, entrega con nombre del receptor y devolución. Ambas encomiendas terminaron en su estado correcto. Al finalizar se eliminaron los datos de prueba y se restauró el modo `BLOCK`.
+**Validación funcional (2026-11-03):** se recorrieron los flujos desde el navegador usando exclusivamente `accivia_test`: una entrada normal; bloqueo de entrada duplicada; rechazo de excepción sin supervisor y aceptación con credenciales válidas; recepción de encomienda, entrega con nombre del receptor y devolución. Ambas encomiendas terminaron en su estado correcto. Al finalizar se eliminaron los datos de prueba y se restauró el modo `BLOCK`.
 
 **Validación técnica (2026-11-03):** 15 pruebas unitarias, 23 pruebas de integración y el build de API/web pasaron. El build web reportó una advertencia no bloqueante por el tamaño del bundle.
 
@@ -94,7 +94,7 @@ Las fases representan dependencias y orden de producto, no fechas comprometidas.
 - Implementar PQRS con categorías, responsable, estados, vencimientos, comentarios visibles/internos y trazabilidad.
 - Verificar que el portal funcione bien en móvil antes de decidir si se requiere una aplicación nativa.
 
-**Estado de la primera entrega:** administración de usuarios y roles integrada en [PR #10](https://github.com/josclem/resi-control-project/pull/10). Las invitaciones por correo y los prerregistros de visitas se integraron en `main` mediante [PR #12](https://github.com/josclem/resi-control-project/pull/12), que incluyó [PR #11](https://github.com/josclem/resi-control-project/pull/11). El build y las suites registradas en el contexto del proyecto pasan; la validación manual en navegador de los nuevos flujos de visitas y el piloto siguen pendientes.
+**Estado de la primera entrega:** administración de usuarios y roles integrada en [PR #10](https://github.com/josclem/accivia/pull/10). Las invitaciones por correo y los prerregistros de visitas se integraron en `main` mediante [PR #12](https://github.com/josclem/accivia/pull/12), que incluyó [PR #11](https://github.com/josclem/accivia/pull/11). El build y las suites registradas en el contexto del proyecto pasan; la validación manual en navegador de los nuevos flujos de visitas y el piloto siguen pendientes.
 
 **Criterio de salida:** residentes pueden usar los flujos acordados desde móvil; portería puede validar visitas pre-registradas; avisos y cambios de estado son auditables; permisos y consentimiento tienen pruebas.
 

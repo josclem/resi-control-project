@@ -1,10 +1,10 @@
 # Spec: Control de acceso residencial
 
-> Nota de estado: esta es la especificación original del MVP. El alcance implementado es más amplio (vehículos, QR/código de barras, fotografías, configuración y encomiendas). El estado vigente está en [CONTEXTO_PROYECTO.md](C:/Users/klement/resi-control/CONTEXTO_PROYECTO.md) y en las specs `.kiro/specs/access-control/design.md` y `.kiro/specs/encomiendas/`.
+> Nota de estado: esta es la especificación original del MVP. El alcance implementado es más amplio (vehículos, QR/código de barras, fotografías, configuración y encomiendas). El estado vigente está en [CONTEXTO_PROYECTO.md](C:/Users/klement/accivia/CONTEXTO_PROYECTO.md) y en las specs `.kiro/specs/access-control/design.md` y `.kiro/specs/encomiendas/`.
 
 ## Objetivo
 
-Construir el primer flujo operativo de Resi Control para autenticar al personal autorizado, registrar personas y guardar movimientos de entrada y salida.
+Construir el primer flujo operativo de Accivia para autenticar al personal autorizado, registrar personas y guardar movimientos de entrada y salida.
 
 ## Actores
 

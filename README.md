@@ -1,4 +1,4 @@
-# Resi Control
+# Accivia
 
 MVP para gestionar el acceso de residentes y visitantes de un conjunto residencial, incluyendo el control de encomiendas en portería.
 
@@ -17,7 +17,7 @@ MVP para gestionar el acceso de residentes y visitantes de un conjunto residenci
 4. Ejecutar `npm run db:generate`, `npm run db:push` y `npm run db:seed`.
 5. Iniciar con `npm run dev`.
 
-Usuario inicial de desarrollo: `admin@resicontrol.local` / `Admin123!`. Debe cambiarse antes de usar el sistema en producción.
+Usuario inicial de desarrollo: `admin@accivia.local` / `Admin123!`. Debe cambiarse antes de usar el sistema en producción.
 
 La gestión de usuarios y roles permite crear, editar y desactivar cuentas, y administrar roles personalizados. La administración de la residencia decide si asigna una cuenta individual a cada portero o usa una cuenta compartida; las cuentas individuales permiten atribuir los registros de portería a cada operador. El botón **Cerrar sesión** está disponible en el portal de residente y la interfaz de administración. Las cuentas de residentes continúan activándose por invitación; la administración ordinaria no elimina cuentas ni sus registros históricos.
 
@@ -48,12 +48,12 @@ Para Gmail:
    SMTP_HOST="smtp.gmail.com"
    SMTP_PORT=465
    SMTP_SECURE=true
-   SMTP_USER="resicontrol.co@gmail.com"
+   SMTP_USER="accivia.co@gmail.com"
    SMTP_APP_PASSWORD="contraseña-de-aplicación"
-   EMAIL_FROM="Resi Control <resicontrol.co@gmail.com>"
+   EMAIL_FROM="Accivia <accivia.co@gmail.com>"
    ```
 
-   `SMTP_USER` y el correo de `EMAIL_FROM` deben pertenecer a la cuenta Gmail autorizada. En este proyecto la cuenta remitente es `resicontrol.co@gmail.com`. Mantén `.env` fuera de Git y no compartas ni registres la contraseña de aplicación.
+   `SMTP_USER` y el correo de `EMAIL_FROM` deben pertenecer a la cuenta Gmail autorizada. En este proyecto la cuenta remitente es `accivia.co@gmail.com`. Mantén `.env` fuera de Git y no compartas ni registres la contraseña de aplicación.
 4. Reinicia la API después de cambiar `.env`.
 
 `http://localhost:5173` solo sirve para probar el enlace en el mismo equipo donde corre la aplicación. Antes de invitar residentes reales, publica el frontend y la API bajo HTTPS; configura `WEB_APP_URL` y `WEB_ORIGIN` en `apps/api/.env`, y `VITE_API_URL` en `apps/web/.env` antes de compilar el frontend. Luego se puede cambiar Gmail por un proveedor SMTP del dominio propio sin cambiar el flujo de invitación.
@@ -65,7 +65,7 @@ El bloqueo observado con Avast Free afecta la conexión SMTP de la API ejecutada
 Desde la raíz del proyecto:
 
 - `npm test` ejecuta pruebas unitarias sin conectarse a PostgreSQL.
-- `npm run test:integration` ejecuta pruebas de rutas y persistencia; requiere una base PostgreSQL exclusiva llamada `resi_control_test`.
+- `npm run test:integration` ejecuta pruebas de rutas y persistencia; requiere una base PostgreSQL exclusiva llamada `accivia_test`.
 - `npm run build` valida tipos y compila API y frontend.
 
 En cada pull request hacia `main` y en cada push a `main`, GitHub Actions ejecuta las tres validaciones usando PostgreSQL 16 aislado para las pruebas de integración.
@@ -73,14 +73,14 @@ En cada pull request hacia `main` y en cada push a `main`, GitHub Actions ejecut
 Para preparar la base de integración en PowerShell, configura `DATABASE_URL_TEST` con las credenciales de PostgreSQL y el nombre reservado, y úsala explícitamente al crear el esquema:
 
 ```powershell
-$env:DATABASE_URL_TEST = "postgresql://postgres:postgres@localhost:5432/resi_control_test"
+$env:DATABASE_URL_TEST = "postgresql://postgres:postgres@localhost:5432/accivia_test"
 $env:DATABASE_URL = $env:DATABASE_URL_TEST
 npm run db:push
 Remove-Item Env:DATABASE_URL
 npm run test:integration
 ```
 
-La suite de integración no usa el `.env` de desarrollo: requiere `DATABASE_URL_TEST` y rechaza cualquier base cuyo nombre no sea exactamente `resi_control_test`; también bloquea la ejecución con `NODE_ENV=production`. Sus fixtures son únicos por ejecución y se limpian al finalizar. Nunca configures la URL de desarrollo o producción en `DATABASE_URL_TEST`.
+La suite de integración no usa el `.env` de desarrollo: requiere `DATABASE_URL_TEST` y rechaza cualquier base cuyo nombre no sea exactamente `accivia_test`; también bloquea la ejecución con `NODE_ENV=production`. Sus fixtures son únicos por ejecución y se limpian al finalizar. Nunca configures la URL de desarrollo o producción en `DATABASE_URL_TEST`.
 
 La API exporta `createApp` desde `apps/api/src/server.ts`; el arranque que escucha en el puerto está separado en `apps/api/src/index.ts`, para que las pruebas HTTP no abran un puerto real.
 

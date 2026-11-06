@@ -1,6 +1,6 @@
 # Diseño: Control de acceso residencial
 
-> Estado: implementado y en evolución. Este documento refleja la arquitectura vigente; el detalle funcional y el historial están en [CONTEXTO_PROYECTO.md](C:/Users/klement/resi-control/CONTEXTO_PROYECTO.md).
+> Estado: implementado y en evolución. Este documento refleja la arquitectura vigente; el detalle funcional y el historial están en [CONTEXTO_PROYECTO.md](C:/Users/klement/accivia/CONTEXTO_PROYECTO.md).
 
 ## Arquitectura
 

@@ -17,8 +17,8 @@ export function getTestDatabaseUrl(value: string | undefined) {
   if (!['postgres:', 'postgresql:'].includes(url.protocol)) {
     throw new Error('DATABASE_URL_TEST no es una URL válida de PostgreSQL.');
   }
-  if (databaseName !== 'resi_control_test') {
-    throw new Error('DATABASE_URL_TEST debe apuntar exclusivamente a la base PostgreSQL resi_control_test.');
+  if (databaseName !== 'accivia_test') {
+    throw new Error('DATABASE_URL_TEST debe apuntar exclusivamente a la base PostgreSQL accivia_test.');
   }
 
   return value;

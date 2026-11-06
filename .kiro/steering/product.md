@@ -1,8 +1,8 @@
-# Resi Control - Contexto del producto
+# Accivia - Contexto del producto
 
 ## Propósito
 
-Resi Control es un sistema para registrar y supervisar el acceso de personas a un conjunto residencial y para controlar las encomiendas que llegan a portería. Debe permitir identificar residentes, propietarios, inquilinos y visitantes, registrar entradas y salidas, recibir y entregar paquetes, comida, recibos y correo, y ofrecer trazabilidad para la administración y vigilancia.
+Accivia es un sistema para registrar y supervisar el acceso de personas a un conjunto residencial y para controlar las encomiendas que llegan a portería. Debe permitir identificar residentes, propietarios, inquilinos y visitantes, registrar entradas y salidas, recibir y entregar paquetes, comida, recibos y correo, y ofrecer trazabilidad para la administración y vigilancia.
 
 ## Alcance del MVP
 

@@ -2,7 +2,7 @@
 
 ## Objetivo
 
-Permitir que administradores envíen avisos o promociones por correo a residentes registrados, aunque no tengan una cuenta de usuario en Resi Control.
+Permitir que administradores envíen avisos o promociones por correo a residentes registrados, aunque no tengan una cuenta de usuario en Accivia.
 
 ## Actores y permisos
 
@@ -38,6 +38,6 @@ Permitir que administradores envíen avisos o promociones por correo a residente
 ## Validación y despliegue
 
 - Validar compilación de API y frontend, typecheck de pruebas y pruebas unitarias.
-- Las pruebas de integración requieren `DATABASE_URL_TEST` apuntando exclusivamente a `resi_control_test`.
+- Las pruebas de integración requieren `DATABASE_URL_TEST` apuntando exclusivamente a `accivia_test`.
 - Sincronizar el esquema solo en una base de pruebas aislada; no ejecutar `db:push` con la URL de desarrollo o producción.
 - Configurar SMTP en el entorno de la API y `WEB_APP_URL` para construir el enlace público de baja.
