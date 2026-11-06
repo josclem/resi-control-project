@@ -9,6 +9,7 @@ import { ResidentCommunications } from './ResidentCommunications';
 import { ResidentEmailUnsubscribe } from './ResidentEmailUnsubscribe';
 import { apiBaseUrl } from './api';
 import './access-search.css';
+import './loading.css';
 import './styles.css';
 
 type BuildingSectionType = 'TORRE' | 'INTERIOR';
@@ -249,6 +250,17 @@ function App() {
   const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [loginError, setLoginError] = useState('');
   const [loginNotice, setLoginNotice] = useState('');
+  const [loginSaving, setLoginSaving] = useState(false);
+  const [passwordResetToken, setPasswordResetToken] = useState(() => new URLSearchParams(window.location.hash.slice(1)).get('reset-password') ?? '');
+  const [passwordResetEmail, setPasswordResetEmail] = useState('');
+  const [passwordResetPassword, setPasswordResetPassword] = useState('');
+  const [passwordResetConfirmation, setPasswordResetConfirmation] = useState('');
+  const [passwordResetError, setPasswordResetError] = useState('');
+  const [passwordResetNotice, setPasswordResetNotice] = useState('');
+  const [passwordResetSaving, setPasswordResetSaving] = useState(false);
+  const [showPasswordReset, setShowPasswordReset] = useState(false);
+  const [showPasswordResetConfirmation, setShowPasswordResetConfirmation] = useState(false);
+  const [showPasswordRecovery, setShowPasswordRecovery] = useState(false);
   const [invitationToken, setInvitationToken] = useState(() => new URLSearchParams(window.location.hash.slice(1)).get('invite') ?? '');
   const [emailUnsubscribeToken] = useState(() => new URLSearchParams(window.location.hash.slice(1)).get('email-unsubscribe') ?? '');
   const [activationPassword, setActivationPassword] = useState('');
@@ -815,33 +827,88 @@ function App() {
     setLoginNotice('');
     setError('');
     setNotice('');
-    const response = await apiFetch(`${api}/api/auth/login`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }),
-    });
-    if (!response.ok) { setLoginError('Correo o contraseña inválidos.'); return; }
-    const data = await response.json();
-    localStorage.setItem('token', data.token);
-    localStorage.setItem('userRole', data.user.role);
-    localStorage.setItem('userId', String(data.user.id));
-    localStorage.setItem('userPermissions', JSON.stringify(data.user.permissions));
-    localStorage.setItem('availableResidences', JSON.stringify(data.user.availableResidences));
-    setUserPermissions(data.user.permissions);
-    setAvailableResidences(data.user.availableResidences);
-    setUserRole(data.user.role);
-    setCurrentUserId(data.user.id);
-    setActiveView(data.user.permissions.includes('ACCESS_VIEW') || data.user.permissions.includes('ACCESS_REGISTER') ? 'movements'
-      : data.user.permissions.includes('PEOPLE_VIEW') ? 'people'
-        : data.user.permissions.includes('VEHICLES_VIEW') ? 'vehicles'
-          : data.user.permissions.includes('DELIVERIES_VIEW') ? 'deliveries'
-            : data.user.permissions.includes('USERS_MANAGE') ? 'users' : 'settings');
-    if (data.user.role === 'SUPER_ADMINISTRADOR' && data.user.availableResidences.length) {
-      const currentSelection = data.user.availableResidences.some((item: AvailableResidence) => String(item.id) === activeResidenceId)
-        ? activeResidenceId
-        : String(data.user.availableResidences[0].id);
-      localStorage.setItem('activeResidenceId', currentSelection);
-      setActiveResidenceId(currentSelection);
+    setLoginSaving(true);
+    try {
+      const response = await apiFetch(`${api}/api/auth/login`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }),
+      });
+      if (!response.ok) { setLoginError('Correo o contraseña inválidos.'); return; }
+      const data = await response.json();
+      localStorage.setItem('token', data.token);
+      localStorage.setItem('userRole', data.user.role);
+      localStorage.setItem('userId', String(data.user.id));
+      localStorage.setItem('userPermissions', JSON.stringify(data.user.permissions));
+      localStorage.setItem('availableResidences', JSON.stringify(data.user.availableResidences));
+      setUserPermissions(data.user.permissions);
+      setAvailableResidences(data.user.availableResidences);
+      setUserRole(data.user.role);
+      setCurrentUserId(data.user.id);
+      setActiveView(data.user.permissions.includes('ACCESS_VIEW') || data.user.permissions.includes('ACCESS_REGISTER') ? 'movements'
+        : data.user.permissions.includes('PEOPLE_VIEW') ? 'people'
+          : data.user.permissions.includes('VEHICLES_VIEW') ? 'vehicles'
+            : data.user.permissions.includes('DELIVERIES_VIEW') ? 'deliveries'
+              : data.user.permissions.includes('USERS_MANAGE') ? 'users' : 'settings');
+      if (data.user.role === 'SUPER_ADMINISTRADOR' && data.user.availableResidences.length) {
+        const currentSelection = data.user.availableResidences.some((item: AvailableResidence) => String(item.id) === activeResidenceId)
+          ? activeResidenceId
+          : String(data.user.availableResidences[0].id);
+        localStorage.setItem('activeResidenceId', currentSelection);
+        setActiveResidenceId(currentSelection);
+      }
+      setAuthenticated(true);
+    } finally {
+      setLoginSaving(false);
     }
-    setAuthenticated(true);
+  }
+
+  async function requestPasswordReset(event: FormEvent) {
+    event.preventDefault();
+    setPasswordResetError('');
+    setPasswordResetNotice('');
+    setPasswordResetSaving(true);
+    try {
+      const response = await apiFetch(`${api}/api/auth/password-reset/request`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: passwordResetEmail }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.message ?? 'No se pudo solicitar la recuperación.');
+      setPasswordResetNotice(data.message);
+    } catch (reason) {
+      setPasswordResetError(reason instanceof Error ? reason.message : 'No se pudo solicitar la recuperación.');
+    } finally {
+      setPasswordResetSaving(false);
+    }
+  }
+
+  async function completePasswordReset(event: FormEvent) {
+    event.preventDefault();
+    setPasswordResetError('');
+    if (passwordResetPassword !== passwordResetConfirmation) {
+      setPasswordResetError('Las contraseñas no coinciden.');
+      return;
+    }
+    setPasswordResetSaving(true);
+    try {
+      const response = await apiFetch(`${api}/api/auth/password-reset/complete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: passwordResetToken, password: passwordResetPassword }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.message ?? 'No se pudo actualizar la contraseña.');
+      setPasswordResetToken('');
+      setPassword('');
+      setPasswordResetPassword('');
+      setPasswordResetConfirmation('');
+      setLoginNotice(data.message);
+      window.history.replaceState({}, '', '/');
+    } catch (reason) {
+      setPasswordResetError(reason instanceof Error ? reason.message : 'No se pudo actualizar la contraseña.');
+    } finally {
+      setPasswordResetSaving(false);
+    }
   }
 
   function logout() {
@@ -1263,6 +1330,13 @@ function App() {
 
   if (emailUnsubscribeToken) return <ResidentEmailUnsubscribe token={emailUnsubscribeToken} />;
 
+  if (passwordResetToken) return <main className="login-page"><form className="login-card" onSubmit={completePasswordReset}>
+    <span className="eyebrow">Accivia</span><h1>Nueva contraseña</h1><p>Define una nueva contraseña para tu cuenta.</p>
+    <label>Nueva contraseña<div className="password-input-wrap"><input type={showPasswordReset ? 'text' : 'password'} autoComplete="new-password" minLength={12} maxLength={128} required value={passwordResetPassword} onChange={(event) => setPasswordResetPassword(event.target.value)} /><PasswordVisibilityButton visible={showPasswordReset} onToggle={() => setShowPasswordReset((visible) => !visible)} label="nueva contraseña" /></div></label>
+    <label>Confirma la contraseña<div className="password-input-wrap"><input type={showPasswordResetConfirmation ? 'text' : 'password'} autoComplete="new-password" minLength={12} maxLength={128} required value={passwordResetConfirmation} onChange={(event) => setPasswordResetConfirmation(event.target.value)} /><PasswordVisibilityButton visible={showPasswordResetConfirmation} onToggle={() => setShowPasswordResetConfirmation((visible) => !visible)} label="confirmación de contraseña" /></div></label>
+    {passwordResetError && <div className="notice">{passwordResetError}</div>}<button disabled={passwordResetSaving} type="submit">{passwordResetSaving ? 'Actualizando...' : 'Actualizar contraseña'}</button>
+  </form></main>;
+
   if (invitationToken) return <main className="login-page"><form className="login-card" onSubmit={activateResident}>
     <span className="eyebrow">Accivia</span><h1>Activa tu cuenta</h1><p>Crea una contraseña para acceder como residente.</p>
     <label>Nueva contraseña<div className="password-input-wrap"><input type={showActivationPassword ? 'text' : 'password'} autoComplete="new-password" minLength={12} maxLength={128} required value={activationPassword} onChange={(event) => setActivationPassword(event.target.value)} /><PasswordVisibilityButton visible={showActivationPassword} onToggle={() => setShowActivationPassword((visible) => !visible)} label="nueva contraseña" /></div></label>
@@ -1300,11 +1374,20 @@ function App() {
     </section>
   </main>;
 
+  if (!authenticated && showPasswordRecovery) return <main className="login-page"><form className="login-card" onSubmit={requestPasswordReset}>
+    <span className="eyebrow">Accivia</span><h1>Recuperar contraseña</h1><p>Te enviaremos un enlace si el correo está registrado.</p>
+    <label>Correo<input type="email" autoComplete="email" required value={passwordResetEmail} onChange={(event) => setPasswordResetEmail(event.target.value)} /></label>
+    {passwordResetError && <div className="notice">{passwordResetError}</div>}{passwordResetNotice && <div className="success">{passwordResetNotice}</div>}
+    <button disabled={passwordResetSaving} type="submit">{passwordResetSaving ? 'Enviando...' : 'Enviar enlace'}</button>
+    <button className="secondary" type="button" onClick={() => { setShowPasswordRecovery(false); setPasswordResetError(''); setPasswordResetNotice(''); }}>Volver al inicio de sesión</button>
+  </form></main>;
+
   if (!authenticated) return <main className="login-page"><form className="login-card" onSubmit={login}>
     <span className="eyebrow">Accivia</span><h1>Iniciar sesión</h1><p>Ingresa para administrar el acceso residencial.</p>
     <label>Correo<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label>
     <label>Contraseña<div className="password-input-wrap"><input type={showLoginPassword ? 'text' : 'password'} autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} /><PasswordVisibilityButton visible={showLoginPassword} onToggle={() => setShowLoginPassword((visible) => !visible)} label="contraseña" /></div></label>
-    {loginError && <div className="notice">{loginError}</div>}{loginNotice && <div className="success">{loginNotice}</div>}<button type="submit">Ingresar</button>
+    {loginError && <div className="notice">{loginError}</div>}{loginNotice && <div className="success">{loginNotice}</div>}<button disabled={loginSaving} type="submit"><span className={loginSaving ? 'button-spinner' : undefined} aria-hidden="true" />{loginSaving ? 'Verificando...' : 'Ingresar'}</button>
+    <button className="secondary" type="button" onClick={() => { setShowPasswordRecovery(true); setPasswordResetEmail(email); setPasswordResetError(''); setPasswordResetNotice(''); }}>¿Olvidaste tu contraseña?</button>
   </form></main>;
 
   return <main>
