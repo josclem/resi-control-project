@@ -52,7 +52,7 @@ Permitir que la portería registre las encomiendas que llegan a la residencia �
 - Validación de entradas con Zod.
 - Mensajes de error claros en español y códigos HTTP apropiados.
 - La base de datos debe ser PostgreSQL mediante Prisma.
-- La interfaz debe mantener el estilo existente de Resi Control.
+- La interfaz debe mantener el estilo existente de Accivia.
 - `npm run build` debe terminar sin errores.
 
 ## Criterios de aceptación del MVP

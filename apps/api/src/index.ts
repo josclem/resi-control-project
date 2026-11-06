@@ -18,4 +18,4 @@ markExpiredVisits(prisma).catch((error: unknown) => {
   console.error('No se pudieron actualizar las visitas vencidas al iniciar la API.', error);
 });
 
-app.listen(port, () => console.log(`Resi Control API escuchando en http://localhost:${port}`));
+app.listen(port, () => console.log(`Accivia API escuchando en http://localhost:${port}`));

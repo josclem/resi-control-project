@@ -1,12 +1,12 @@
-# Resi Control: contexto del proyecto
+# Accivia: contexto del proyecto
 
 ## Propósito
 
-Resi Control es un sistema web para administrar el control de acceso de una residencia. El sistema maneja personas, vehículos, fotografías, movimientos de entrada y salida, configuración de la residencia y diferentes formas de identificar a una persona o vehículo. También administra las encomiendas que llegan a la portería —comida, paquetes, recibos de servicios y correo— y su entrega a los residentes.
+Accivia es un sistema web para administrar el control de acceso de una residencia. El sistema maneja personas, vehículos, fotografías, movimientos de entrada y salida, configuración de la residencia y diferentes formas de identificar a una persona o vehículo. También administra las encomiendas que llegan a la portería —comida, paquetes, recibos de servicios y correo— y su entrega a los residentes.
 
 El proyecto está ubicado en:
 
-`C:\Users\klement\resi-control`
+`C:\Users\klement\resi-control-project`
 
 El entorno actual usa Windows, PostgreSQL local y una API Express con frontend React/Vite.
 
@@ -14,7 +14,7 @@ El entorno actual usa Windows, PostgreSQL local y una API Express con frontend R
 
 ### Backend
 
-- Ubicación: [apps/api/](C:/Users/klement/resi-control/apps/api/)
+- Ubicación: [apps/api/](C:/Users/klement/resi-control-project/apps/api/)
 - Express + TypeScript.
 - Prisma como ORM.
 - PostgreSQL como base de datos.
@@ -25,24 +25,24 @@ El entorno actual usa Windows, PostgreSQL local y una API Express con frontend R
 
 Archivo principal:
 
-- [server.ts](C:/Users/klement/resi-control/apps/api/src/server.ts)
+- [server.ts](C:/Users/klement/resi-control-project/apps/api/src/server.ts)
 
 ### Frontend
 
-- Ubicación: [apps/web/](C:/Users/klement/resi-control/apps/web/)
+- Ubicación: [apps/web/](C:/Users/klement/resi-control-project/apps/web/)
 - React 18 + TypeScript.
 - Vite.
 - La aplicación normalmente corre en el puerto `5173`.
 
 Archivos principales:
 
-- [main.tsx](C:/Users/klement/resi-control/apps/web/src/main.tsx)
-- [styles.css](C:/Users/klement/resi-control/apps/web/src/styles.css)
+- [main.tsx](C:/Users/klement/resi-control-project/apps/web/src/main.tsx)
+- [styles.css](C:/Users/klement/resi-control-project/apps/web/src/styles.css)
 
 ### Base de datos
 
-- Esquema Prisma: [schema.prisma](C:/Users/klement/resi-control/apps/api/prisma/schema.prisma)
-- Base de datos local: PostgreSQL `resi_control`.
+- Esquema Prisma: [schema.prisma](C:/Users/klement/resi-control-project/apps/api/prisma/schema.prisma)
+- Base de datos local: PostgreSQL `accivia`.
 - El archivo `.env` del backend contiene la conexión y el secreto JWT. No se deben copiar sus valores a documentación ni al repositorio.
 
 ## Funcionalidades implementadas
@@ -398,17 +398,17 @@ Para actualizar la base de datos después de cambios en Prisma:
 
 ```powershell
 npm run db:generate
-npm run db:push --workspace @resi-control/api -- --accept-data-loss
+npm run db:push --workspace @accivia/api -- --accept-data-loss
 ```
 
 En Windows, si `prisma generate` falla con `EPERM` por el motor bloqueado, hay que detener únicamente el proceso Node de la API que está usando el proyecto y volver a ejecutar `npm run db:generate`. No se deben detener procesos ajenos.
 
 ## Estado actual de validación
 
-- Validación manual en navegador (2026-11-04), usando solo `resi_control_test`: login, alta de residente/visitante, accesos peatonales y vehiculares, tablero, administración de usuarios y roles, bloqueo de movimiento repetido, autorización de supervisor y encomiendas.
-- Validación manual de invitaciones en `resi_control_test`: listado de residentes invitables, error claro cuando SMTP no está configurado, activación con contraseña propia, inicio de sesión y pantalla de residente. Los datos temporales se limpiaron.
-- `verify()` pasó y se envió una invitación real de prueba al correo indicado por el usuario usando la base local `resi_control`; Avast estaba temporalmente desactivado y no se desactivó la validación TLS. El usuario recibió el mensaje, abrió el enlace y activó la cuenta.
-- El portal de residentes permite crear, listar y cancelar prerregistros; el flujo de portería registra autorizaciones sin prerregistro con origen auditado y movimientos de entrada/salida vinculados. Las pruebas de integración usan `resi_control_test`.
+- Validación manual en navegador (2026-11-04), usando solo `accivia_test`: login, alta de residente/visitante, accesos peatonales y vehiculares, tablero, administración de usuarios y roles, bloqueo de movimiento repetido, autorización de supervisor y encomiendas.
+- Validación manual de invitaciones en `accivia_test`: listado de residentes invitables, error claro cuando SMTP no está configurado, activación con contraseña propia, inicio de sesión y pantalla de residente. Los datos temporales se limpiaron.
+- `verify()` pasó y se envió una invitación real de prueba al correo indicado por el usuario usando la base local `accivia`; Avast estaba temporalmente desactivado y no se desactivó la validación TLS. El usuario recibió el mensaje, abrió el enlace y activó la cuenta.
+- El portal de residentes permite crear, listar y cancelar prerregistros; el flujo de portería registra autorizaciones sin prerregistro con origen auditado y movimientos de entrada/salida vinculados. Las pruebas de integración usan `accivia_test`.
 - El flujo manual confirmó entrada/salida de persona y vehículo. Un movimiento repetido en modo `BLOCK` no creó un registro; con modo `SUPERVISOR`, el formulario mantuvo la selección y la autorización creó un solo movimiento.
 - Una encomienda de prueba se registró, entregó con el nombre de quien la retiró y otra se marcó devuelta.
 - Un código desconocido de 32 caracteres enviado a `POST /api/access/scan` respondió `404` con `Código no reconocido.`. No se probó un QR antiguo con cámara.
@@ -427,9 +427,9 @@ El build muestra una advertencia de Vite sobre un bundle frontend grande debido 
 ### Pruebas automatizadas
 
 - `npm test`: correcto, 5 archivos y 15 pruebas.
-- Suite completa de integración de API: correcta, 4 archivos y 19 pruebas, usando exclusivamente `resi_control_test`.
+- Suite completa de integración de API: correcta, 4 archivos y 19 pruebas, usando exclusivamente `accivia_test`.
 - `npm run build`: correcto para API y frontend.
-- Las pruebas de integración usan una base PostgreSQL exclusiva llamada `resi_control_test`, nunca la base local de desarrollo ni producción.
+- Las pruebas de integración usan una base PostgreSQL exclusiva llamada `accivia_test`, nunca la base local de desarrollo ni producción.
 - Los casos de usuarios y roles verifican límites de privilegios, selección de residencia del SuperAdministrador, conservación de cuentas desactivadas y protección del último administrador.
 - Cada PR debe ejecutar las pruebas automatizadas y `npm run build`.
 
@@ -455,7 +455,7 @@ El build muestra una advertencia de Vite sobre un bundle frontend grande debido 
 
 ### 4. Limpieza y optimización técnica
 
-El archivo [styles.css](C:/Users/klement/resi-control/apps/web/src/styles.css) creció mediante varias iteraciones y contiene reglas repetidas. Conviene hacer una limpieza posterior, cuidando no alterar:
+El archivo [styles.css](C:/Users/klement/resi-control-project/apps/web/src/styles.css) creció mediante varias iteraciones y contiene reglas repetidas. Conviene hacer una limpieza posterior, cuidando no alterar:
 
 - La tabla de últimos movimientos.
 - La grilla lineal de vehículos.
@@ -506,21 +506,21 @@ La notificación cuando llega una visita no está implementada; se definirá y p
 
 ## Problemas o detalles conocidos
 
-- [main.tsx](C:/Users/klement/resi-control/apps/web/src/main.tsx) contiene JSX en líneas muy largas.
+- [main.tsx](C:/Users/klement/resi-control-project/apps/web/src/main.tsx) contiene JSX en líneas muy largas.
 - Existe una función `createVehicle` redundante anidada dentro de `createAccess`; no bloquea la compilación, pero debería eliminarse en una limpieza futura.
 - El manejo de algunas acciones antiguas todavía usa `window.alert` o `window.confirm`; la interfaz de fotografía ya usa avisos integrados en los flujos principales.
 - `npm install` reportó vulnerabilidades de auditoría en dependencias transitivas. Deben revisarse con cuidado antes de ejecutar actualizaciones automáticas.
 - La cámara requiere permisos del navegador y normalmente debe usarse en un contexto permitido por el navegador, como `localhost` o HTTPS.
 - La webcam actual tiene foco fijo y puede no leer un QR mostrado en el monitor; el mismo QR impreso se lee mejor. El problema quedó pausado por decisión del usuario.
 - Los `accessCode` fueron regenerados. Cualquier QR impreso o guardado con un código anterior ya no es válido y debe reemplazarse.
-- [styles.css](C:/Users/klement/resi-control/apps/web/src/styles.css) contiene bloques y media queries duplicados; funciona, pero conviene consolidarlo.
+- [styles.css](C:/Users/klement/resi-control-project/apps/web/src/styles.css) contiene bloques y media queries duplicados; funciona, pero conviene consolidarlo.
 - No se debe cambiar `DATABASE_URL` ni `JWT_SECRET` en este documento.
 
 ## Punto exacto para continuar
 
 El último trabajo completado fue:
 
-1. Verificar manualmente en `resi_control_test` los flujos de personas, vehículos, accesos, movimientos repetidos, autorización de supervisor y encomiendas.
+1. Verificar manualmente en `accivia_test` los flujos de personas, vehículos, accesos, movimientos repetidos, autorización de supervisor y encomiendas.
 2. Implementar invitaciones de residentes por correo, activación con contraseña propia y asociación con su registro de persona.
 3. Comprobar activación y login desde el navegador; probar respuesta clara cuando SMTP aún no está configurado.
 4. Ejecutar `npm run build`, `npm test` y pruebas de integración, incluidas las nuevas rutas de visitas.
