@@ -769,7 +769,7 @@ app.get('/api/admin/residences', requireAuth, allowRoles(UserRole.SUPER_ADMINIST
   try {
     return res.json(await prisma.residence.findMany({
       where: { active: true },
-      select: { id: true, name: true, code: true },
+      select: { id: true, name: true, code: true, active: true },
       orderBy: { name: 'asc' },
     }));
   } catch (error) { return next(error); }
