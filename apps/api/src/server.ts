@@ -39,6 +39,7 @@ import {
   residentEmailConsentSchema,
   residentEmailUnsubscribeSchema,
   residenceSchema,
+  residenceCreateSchema,
   supervisorSchema,
   vehicleSchema,
   userCreateSchema,
@@ -772,6 +773,32 @@ app.get('/api/admin/residences', requireAuth, allowRoles(UserRole.SUPER_ADMINIST
       orderBy: { name: 'asc' },
     }));
   } catch (error) { return next(error); }
+});
+
+app.post('/api/admin/residences', requireAuth, allowRoles(UserRole.SUPER_ADMINISTRADOR), async (req, res, next) => {
+  try {
+    const input = residenceCreateSchema.parse(req.body);
+    const residence = await prisma.$transaction(async (transaction) => {
+      const created = await transaction.residence.create({
+        data: { name: input.name, code: input.code },
+        select: { id: true, name: true, code: true, active: true },
+      });
+      await transaction.systemSetting.createMany({
+        data: [
+          { residenceId: created.id, key: 'irregular_access_mode', value: 'BLOCK' },
+          { residenceId: created.id, key: 'access_capture_mode', value: 'MANUAL' },
+        ],
+      });
+      return created;
+    });
+    return res.status(201).json(residence);
+  } catch (error) {
+    if (error instanceof z.ZodError) return res.status(400).json({ message: 'El nombre o código de la residencia no son válidos.' });
+    if (error instanceof Error && 'code' in error && error.code === 'P2002') {
+      return res.status(409).json({ message: 'Ya existe una residencia con ese código.' });
+    }
+    return next(error);
+  }
 });
 
 app.get('/api/admin/roles', requireAuth, requireAnyPermission('ROLES_MANAGE', 'USERS_MANAGE'), async (req: AuthenticatedRequest, res, next) => {

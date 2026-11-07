@@ -19,7 +19,7 @@ MVP para gestionar el acceso de residentes y visitantes de un conjunto residenci
 
 Usuario inicial de desarrollo: `admin@accivia.local` / `Admin123!`. Debe cambiarse antes de usar el sistema en producción.
 
-La gestión de usuarios y roles permite crear, editar y desactivar cuentas, y administrar roles personalizados. La administración de la residencia decide si asigna una cuenta individual a cada portero o usa una cuenta compartida; las cuentas individuales permiten atribuir los registros de portería a cada operador. El botón **Cerrar sesión** está disponible en el portal de residente y la interfaz de administración. Las cuentas de residentes continúan activándose por invitación; la administración ordinaria no elimina cuentas ni sus registros históricos.
+La gestión de usuarios y roles permite crear, editar y desactivar cuentas, y administrar roles personalizados. El **SuperAdministrador** dispone además de la sección **Residencias**, desde la que puede crear nuevas residencias indicando nombre y código interno; las nuevas residencias comienzan con bloqueo de movimientos irregulares y captura manual. La administración de la residencia decide si asigna una cuenta individual a cada portero o usa una cuenta compartida; las cuentas individuales permiten atribuir los registros de portería a cada operador. El botón **Cerrar sesión** está disponible en el portal de residente y la interfaz de administración. Las cuentas de residentes continúan activándose por invitación; la administración ordinaria no elimina cuentas ni sus registros históricos.
 
 La API queda en `http://localhost:4000` y el frontend en `http://localhost:5173`.
 
