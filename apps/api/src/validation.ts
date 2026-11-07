@@ -120,6 +120,10 @@ export const irregularAccessModeSchema = z.enum(['BLOCK', 'SUPERVISOR']);
 export const accessCaptureModeSchema = z.enum(['MANUAL', 'BARCODE', 'QR', 'FINGERPRINT']);
 export const supervisorSchema = z.object({ email: z.string().email(), password: z.string().min(1) });
 export const residenceSchema = z.object({ name: z.string().trim().min(2).max(120) });
+export const residenceCreateSchema = z.object({
+  name: z.string().trim().min(2).max(120),
+  code: z.string().trim().min(2).max(40).regex(/^[A-Z0-9][A-Z0-9_-]*$/, 'El código solo puede contener letras mayúsculas, números, guiones y guiones bajos.'),
+});
 const userRoleSchema = z.enum(['SUPER_ADMINISTRADOR', 'ADMINISTRADOR', 'VIGILANTE', 'PERSONALIZADO']);
 const rolePermissionsSchema = z.array(z.enum(permissions)).max(permissions.length).refine(
   (values) => new Set(values).size === values.length,

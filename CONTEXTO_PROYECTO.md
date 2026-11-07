@@ -306,6 +306,8 @@ Los valores de `access_capture_mode` son:
 - `POST /api/auth/login`
 - `GET /api/residence`
 - `PUT /api/residence`
+- `GET /api/admin/residences` (solo `SUPER_ADMINISTRADOR`)
+- `POST /api/admin/residences` (solo `SUPER_ADMINISTRADOR`)
 
 ### Personas
 
